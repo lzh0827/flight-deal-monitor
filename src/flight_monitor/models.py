@@ -12,6 +12,10 @@ class Candidate:
     departure_date: date
     estimated_price_per_adult: Decimal
     source: str
+    departure_at: datetime | None = None
+    flight_number: str = "待确认"
+    stops: int | None = None
+    booking_url: str = ""
 
     @property
     def key(self) -> tuple[str, str, date]:
@@ -43,4 +47,3 @@ class FlightDeal:
             f"{self.origin}-{self.destination}-"
             f"{self.departure_at.isoformat()}-{flights}"
         )
-

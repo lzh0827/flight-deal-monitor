@@ -10,31 +10,8 @@ from zoneinfo import ZoneInfo
 
 from flight_monitor.models import Candidate, FlightDeal
 from flight_monitor.monitor import merge_candidates, origin_for_time
-from flight_monitor.providers.amadeus import AmadeusClient
+from flight_monitor.providers.cached import CachedFareVerifier
 from flight_monitor.state import MonitorState
-
-
-def sample_offer(total: str = "599.98", seats: int = 2) -> dict:
-    return {
-        "numberOfBookableSeats": seats,
-        "price": {"currency": "CNY", "total": total, "grandTotal": total},
-        "travelerPricings": [
-            {
-                "travelerType": "ADULT",
-                "price": {"total": str(Decimal(total) / 2)},
-                "fareDetailsBySegment": [
-                    {"includedCheckedBags": {"weight": 20, "weightUnit": "KG"}}
-                ],
-            },
-            {
-                "travelerType": "ADULT",
-                "price": {"total": str(Decimal(total) / 2)},
-                "fareDetailsBySegment": [
-                    {"includedCheckedBags": {"weight": 20, "weightUnit": "KG"}}
-                ],
-            },
-        ],
-    }
 
 
 def sample_deal(total: str = "580") -> FlightDeal:
@@ -58,25 +35,30 @@ def sample_deal(total: str = "580") -> FlightDeal:
 
 
 class MonitorTests(unittest.TestCase):
-    def test_price_requires_both_adults_under_300(self) -> None:
-        self.assertTrue(
-            AmadeusClient._offer_qualifies(
-                sample_offer(), 2, Decimal("600"), Decimal("300"), "CNY"
-            )
+    def test_cached_fare_requires_each_adult_under_300(self) -> None:
+        verifier = CachedFareVerifier()
+        candidate = Candidate(
+            "HGH", "CAN", date(2026, 8, 1), Decimal("299.99"), "cache"
         )
-        self.assertFalse(
-            AmadeusClient._offer_qualifies(
-                sample_offer("600.02"), 2, Decimal("600"), Decimal("300"), "CNY"
-            )
+        deal = verifier.verify(
+            candidate, 2, Decimal("600"), Decimal("300"), "CNY", ("cache",)
         )
-        self.assertFalse(
-            AmadeusClient._offer_qualifies(
-                sample_offer(seats=1), 2, Decimal("600"), Decimal("300"), "CNY"
-            )
-        )
+        self.assertIsNotNone(deal)
+        self.assertEqual(deal.total_price, Decimal("599.98"))
 
-    def test_baggage_parsing(self) -> None:
-        self.assertEqual(AmadeusClient._baggage_text(sample_offer()), "20kg")
+        too_expensive = Candidate(
+            "HGH", "CAN", date(2026, 8, 1), Decimal("300.01"), "cache"
+        )
+        self.assertIsNone(
+            verifier.verify(
+                too_expensive,
+                2,
+                Decimal("600"),
+                Decimal("300"),
+                "CNY",
+                ("cache",),
+            )
+        )
 
     def test_merge_candidates_keeps_lowest_and_all_sources(self) -> None:
         first = Candidate("HGH", "CAN", date(2026, 8, 1), Decimal("290"), "A")

@@ -12,7 +12,7 @@ from .config import load_settings
 from .http import build_session
 from .monitor import DealMonitor
 from .notify import PushPlusNotifier
-from .providers.amadeus import AmadeusClient
+from .providers.cached import CachedFareVerifier
 from .providers.travelpayouts import TravelpayoutsDiscovery
 from .state import MonitorState
 
@@ -54,28 +54,18 @@ def main(argv: list[str] | None = None) -> int:
             print("PushPlus 测试消息已提交，请检查微信。")
             return 0
 
-        amadeus = AmadeusClient(
-            _required_env("AMADEUS_CLIENT_ID"),
-            _required_env("AMADEUS_CLIENT_SECRET"),
-            settings.amadeus_environment,
-            settings.request_timeout_seconds,
-            session,
-        )
-        providers = []
-        travelpayouts_token = os.getenv("TRAVELPAYOUTS_TOKEN", "").strip()
-        if travelpayouts_token:
-            providers.append(
-                TravelpayoutsDiscovery(
-                    travelpayouts_token, settings.request_timeout_seconds, session
-                )
+        travelpayouts_token = _required_env("TRAVELPAYOUTS_TOKEN")
+        providers = [
+            TravelpayoutsDiscovery(
+                travelpayouts_token, settings.request_timeout_seconds, session
             )
-        else:
-            providers.append(amadeus)
-            logging.warning("未配置 TRAVELPAYOUTS_TOKEN，将用 Amadeus 缓存发现候选")
+        ]
 
         state = MonitorState(settings.state_file)
         state.load()
-        monitor = DealMonitor(settings, providers, amadeus, notifier, state)
+        monitor = DealMonitor(
+            settings, providers, CachedFareVerifier(), notifier, state
+        )
         monitor.run(datetime.now(ZoneInfo("Asia/Shanghai")), dry_run=args.dry_run)
         return 0
     except Exception as exc:

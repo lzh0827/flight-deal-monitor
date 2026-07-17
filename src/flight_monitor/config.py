@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
@@ -22,7 +21,6 @@ class Settings:
     state_file: Path
     airport_names: dict[str, str]
     origin_cycle: tuple[str, ...]
-    amadeus_environment: str
 
     @property
     def max_total_price(self) -> Decimal:
@@ -31,9 +29,6 @@ class Settings:
 
 def load_settings(path: Path) -> Settings:
     data = json.loads(path.read_text(encoding="utf-8"))
-    environment = os.getenv("AMADEUS_ENVIRONMENT", "production").lower()
-    if environment not in {"test", "production"}:
-        raise ValueError("AMADEUS_ENVIRONMENT 必须是 test 或 production")
     if int(data["adults"]) != 2:
         raise ValueError("当前需求固定为 2 名成人")
     cycle = tuple(str(item).upper() for item in data["origin_cycle"])
@@ -55,5 +50,4 @@ def load_settings(path: Path) -> Settings:
         state_file=(path.parent / data["state_file"]).resolve(),
         airport_names={str(k).upper(): str(v) for k, v in data["airport_names"].items()},
         origin_cycle=cycle,
-        amadeus_environment=environment,
     )

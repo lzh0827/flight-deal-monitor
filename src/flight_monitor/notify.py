@@ -21,25 +21,30 @@ class PushPlusNotifier:
         origin_name = airport_names.get(deal.origin, deal.origin)
         destination_name = airport_names.get(deal.destination, deal.destination)
         flights = " → ".join(deal.flight_numbers)
-        stop_text = "直飞" if deal.stops == 0 else f"中转 {deal.stops} 次"
+        stop_text = (
+            "中转次数待确认"
+            if deal.stops < 0
+            else ("直飞" if deal.stops == 0 else f"中转 {deal.stops} 次")
+        )
         content = "\n".join(
             [
-                f"## ✈️ 发现 ≤ ¥300/人的机票",
+                f"## ✈️ 发现 ≤ ¥300/人的缓存机票价格",
                 "",
                 f"- **航线**：{origin_name}（{deal.origin}）→ "
                 f"{destination_name}（{deal.destination}）",
                 f"- **起飞**：{deal.departure_at.strftime('%Y-%m-%d %H:%M')}",
                 f"- **航班**：{flights}（{stop_text}）",
-                f"- **两人含税总价**：¥{deal.total_price:.2f}",
-                f"- **每人含税价**：¥{deal.price_per_adult:.2f}",
+                f"- **两人估算总价**：¥{deal.total_price:.2f}",
+                f"- **每人缓存价**：¥{deal.price_per_adult:.2f}",
                 f"- **托运行李**：{deal.baggage}",
-                f"- **发现来源**：{'、'.join(deal.discovery_sources)}；Amadeus 实时复核",
-                f"- **复核时间**：{now.strftime('%Y-%m-%d %H:%M:%S')}（Asia/Shanghai）",
+                f"- **发现来源**：{'、'.join(deal.discovery_sources)}（非实时库存）",
+                f"- **发现时间**：{now.strftime('%Y-%m-%d %H:%M:%S')}（Asia/Shanghai）",
                 "",
-                f"[打开携程搜索页]({deal.booking_url}) | "
+                f"[打开 Aviasales 复核]({deal.booking_url}) | "
                 f"[用 Google Flights 比价]({deal.comparison_url})",
                 "",
-                "> 价格和座位会实时变化；付款前请再次核对两名成人的最终含税价、"
+                "> ⚠️ 这是最近用户搜索形成的缓存发现价，不代表当前仍有两张票，"
+                "也不能保证最终含税结算价。请在付款前核对两名成人的总价、座位、"
                 "行李额和票价适用条件。",
             ]
         )
@@ -51,7 +56,7 @@ class PushPlusNotifier:
     def send_test(self) -> None:
         self._send(
             "机票监控测试成功",
-            "## ✅ 微信通知已连通\n\n以后发现每人含税价不超过 ¥300 的机票时，会发到这里。",
+            "## ✅ 微信通知已连通\n\n以后发现每人缓存价不超过 ¥300 的机票时，会发到这里；下单前需要再次核对实时总价。",
         )
 
     def _send(self, title: str, content: str) -> None:
@@ -70,4 +75,3 @@ class PushPlusNotifier:
         payload = response.json()
         if int(payload.get("code", -1)) != 200:
             raise RuntimeError(f"PushPlus 推送失败: {payload.get('msg', payload)}")
-

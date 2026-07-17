@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "flight-deal-monitor"
 version = "1.0.0"
-description = "Monitor verified low-price flights and send WeChat notifications"
+description = "Monitor cached low flight prices and send WeChat notifications"
 requires-python = ">=3.11"
 dependencies = ["requests==2.32.4"]
 
@@ -14,4 +14,3 @@ flight-monitor = "flight_monitor.app:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
-
