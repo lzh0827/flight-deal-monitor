@@ -22,10 +22,6 @@
     "WUX": "无锡硕放",
     "HYN": "台州路桥"
   },
-  "origin_cycle": [
-    "HGH", "SHA", "HGH", "PVG", "HGH", "NGB", "HGH", "SHA",
-    "HGH", "PVG", "HGH", "YIW", "HGH", "SHA", "HGH", "PVG",
-    "HGH", "NKG", "HGH", "SHA", "HGH", "PVG", "HGH", "WNZ",
-    "HGH", "SHA", "HGH", "PVG", "HGH", "WUX", "HGH", "HYN"
-  ]
+  "every_run_origins": ["HGH", "SHA", "PVG"],
+  "rotating_origins": ["NGB", "YIW", "NKG", "WNZ", "WUX", "HYN"]
 }

@@ -9,7 +9,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from flight_monitor.models import Candidate, FlightDeal
-from flight_monitor.monitor import merge_candidates, origin_for_time
+from flight_monitor.monitor import merge_candidates, origins_for_time
 from flight_monitor.providers.cached import CachedFareVerifier
 from flight_monitor.state import MonitorState
 
@@ -67,10 +67,13 @@ class MonitorTests(unittest.TestCase):
         self.assertEqual(merged[0][0].estimated_price_per_adult, Decimal("280"))
         self.assertEqual(merged[0][1], ("A", "B"))
 
-    def test_origin_cycle_is_deterministic(self) -> None:
+    def test_core_origins_run_every_time_and_other_rotates(self) -> None:
         now = datetime(2026, 7, 17, 12, 0, tzinfo=ZoneInfo("Asia/Shanghai"))
-        self.assertEqual(origin_for_time(now, ("HGH",)), "HGH")
-        self.assertIn(origin_for_time(now, ("HGH", "PVG")), {"HGH", "PVG"})
+        origins = origins_for_time(
+            now, ("HGH", "SHA", "PVG"), ("NGB", "YIW", "NKG")
+        )
+        self.assertEqual(origins[:3], ("HGH", "SHA", "PVG"))
+        self.assertIn(origins[3], {"NGB", "YIW", "NKG"})
 
     def test_state_deduplicates_and_notifies_price_drop(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

@@ -2,8 +2,8 @@ name: 低价机票监控
 
 on:
   schedule:
-    # 避开整点高峰；GitHub 定时任务可能有几分钟延迟。
-    - cron: "7,22,37,52 * * * *"
+    # GitHub 使用 UTC；北京时间 07:00–00:59 每 15 分钟运行。
+    - cron: "7,22,37,52 0-16,23 * * *"
   workflow_dispatch:
     inputs:
       dry_run:

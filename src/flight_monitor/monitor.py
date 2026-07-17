@@ -41,10 +41,17 @@ class Notifier(Protocol):
     ) -> None: ...
 
 
-def origin_for_time(now: datetime, cycle: tuple[str, ...]) -> str:
-    """Choose one origin deterministically per 15-minute slot."""
+def origins_for_time(
+    now: datetime,
+    every_run_origins: tuple[str, ...],
+    rotating_origins: tuple[str, ...],
+) -> tuple[str, ...]:
+    """Scan core airports every run and rotate one lower-priority airport."""
     slot = int(now.timestamp()) // (15 * 60)
-    return cycle[slot % len(cycle)]
+    origins = list(every_run_origins)
+    if rotating_origins:
+        origins.append(rotating_origins[slot % len(rotating_origins)])
+    return tuple(dict.fromkeys(origins))
 
 
 def merge_candidates(groups: list[list[Candidate]]) -> list[tuple[Candidate, tuple[str, ...]]]:
@@ -81,25 +88,39 @@ class DealMonitor:
         self.state = state
 
     def run(self, now: datetime, dry_run: bool = False) -> list[FlightDeal]:
-        origin = origin_for_time(now, self.settings.origin_cycle)
+        origins = origins_for_time(
+            now,
+            self.settings.every_run_origins,
+            self.settings.rotating_origins,
+        )
         start = now.date() + timedelta(days=self.settings.departure_start_offset_days)
         end = now.date() + timedelta(days=self.settings.days_ahead)
-        logger.info("本轮扫描 %s，日期 %s 至 %s", origin, start, end)
+        logger.info("本轮扫描 %s，日期 %s 至 %s", "、".join(origins), start, end)
 
         groups: list[list[Candidate]] = []
-        for provider in self.discovery_providers:
-            try:
-                found = provider.discover(
-                    origin,
-                    start,
-                    end,
-                    self.settings.max_price_per_adult,
-                    self.settings.currency,
-                )
-                logger.info("%s 发现 %d 个候选", type(provider).__name__, len(found))
-                groups.append(found)
-            except Exception:
-                logger.exception("%s 发现阶段失败，本轮继续", type(provider).__name__)
+        for origin in origins:
+            for provider in self.discovery_providers:
+                try:
+                    found = provider.discover(
+                        origin,
+                        start,
+                        end,
+                        self.settings.max_price_per_adult,
+                        self.settings.currency,
+                    )
+                    logger.info(
+                        "%s / %s 发现 %d 个候选",
+                        origin,
+                        type(provider).__name__,
+                        len(found),
+                    )
+                    groups.append(found)
+                except Exception:
+                    logger.exception(
+                        "%s / %s 发现阶段失败，本轮继续",
+                        origin,
+                        type(provider).__name__,
+                    )
 
         candidates = []
         for candidate, sources in merge_candidates(groups):

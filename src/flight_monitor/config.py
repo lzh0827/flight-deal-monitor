@@ -21,7 +21,8 @@ class Settings:
     travelpayouts_markets: tuple[str, ...]
     state_file: Path
     airport_names: dict[str, str]
-    origin_cycle: tuple[str, ...]
+    every_run_origins: tuple[str, ...]
+    rotating_origins: tuple[str, ...]
 
     @property
     def max_total_price(self) -> Decimal:
@@ -32,9 +33,14 @@ def load_settings(path: Path) -> Settings:
     data = json.loads(path.read_text(encoding="utf-8"))
     if int(data["adults"]) != 2:
         raise ValueError("当前需求固定为 2 名成人")
-    cycle = tuple(str(item).upper() for item in data["origin_cycle"])
-    if not cycle:
-        raise ValueError("origin_cycle 不能为空")
+    every_run_origins = tuple(
+        str(item).upper() for item in data["every_run_origins"]
+    )
+    rotating_origins = tuple(
+        str(item).upper() for item in data.get("rotating_origins", [])
+    )
+    if not every_run_origins:
+        raise ValueError("every_run_origins 不能为空")
     return Settings(
         currency=str(data["currency"]).upper(),
         adults=int(data["adults"]),
@@ -53,5 +59,6 @@ def load_settings(path: Path) -> Settings:
         ),
         state_file=(path.parent / data["state_file"]).resolve(),
         airport_names={str(k).upper(): str(v) for k, v in data["airport_names"].items()},
-        origin_cycle=cycle,
+        every_run_origins=every_run_origins,
+        rotating_origins=rotating_origins,
     )
