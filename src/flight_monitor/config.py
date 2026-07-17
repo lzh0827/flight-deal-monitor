@@ -18,6 +18,7 @@ class Settings:
     notification_price_drop_cny: Decimal
     renotify_after_missing_hours: int
     request_timeout_seconds: int
+    travelpayouts_markets: tuple[str, ...]
     state_file: Path
     airport_names: dict[str, str]
     origin_cycle: tuple[str, ...]
@@ -47,6 +48,9 @@ def load_settings(path: Path) -> Settings:
         ),
         renotify_after_missing_hours=int(data["renotify_after_missing_hours"]),
         request_timeout_seconds=int(data["request_timeout_seconds"]),
+        travelpayouts_markets=tuple(
+            str(item).lower() for item in data.get("travelpayouts_markets", ["cn"])
+        ),
         state_file=(path.parent / data["state_file"]).resolve(),
         airport_names={str(k).upper(): str(v) for k, v in data["airport_names"].items()},
         origin_cycle=cycle,

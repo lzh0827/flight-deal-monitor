@@ -57,8 +57,12 @@ def main(argv: list[str] | None = None) -> int:
         travelpayouts_token = _required_env("TRAVELPAYOUTS_TOKEN")
         providers = [
             TravelpayoutsDiscovery(
-                travelpayouts_token, settings.request_timeout_seconds, session
+                travelpayouts_token,
+                settings.request_timeout_seconds,
+                session,
+                market,
             )
+            for market in settings.travelpayouts_markets
         ]
 
         state = MonitorState(settings.state_file)

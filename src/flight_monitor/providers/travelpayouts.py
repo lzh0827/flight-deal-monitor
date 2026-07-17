@@ -13,10 +13,17 @@ class TravelpayoutsDiscovery:
 
     endpoint = "https://api.travelpayouts.com/aviasales/v3/prices_for_dates"
 
-    def __init__(self, token: str, timeout: int, session: requests.Session) -> None:
+    def __init__(
+        self,
+        token: str,
+        timeout: int,
+        session: requests.Session,
+        market: str = "cn",
+    ) -> None:
         self.token = token
         self.timeout = timeout
         self.session = session
+        self.market = market.lower()
 
     def discover(
         self,
@@ -35,7 +42,7 @@ class TravelpayoutsDiscovery:
                 "one_way": "true",
                 "direct": "false",
                 "unique": "false",
-                "market": "cn",
+                "market": self.market,
                 "page": 1,
                 "limit": 1000,
                 "sorting": "price",
@@ -72,7 +79,7 @@ class TravelpayoutsDiscovery:
                         destination,
                         departure,
                         price,
-                        "Aviasales缓存价",
+                        f"Aviasales缓存价({self.market.upper()})",
                         departure_at=departure_at,
                         flight_number=flight_number,
                         stops=int(item["transfers"]) if item.get("transfers") is not None else None,

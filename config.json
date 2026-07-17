@@ -9,6 +9,7 @@
   "notification_price_drop_cny": 1,
   "renotify_after_missing_hours": 24,
   "request_timeout_seconds": 25,
+  "travelpayouts_markets": ["cn", "us", "sg"],
   "state_file": "state/monitor-state.json",
   "airport_names": {
     "HGH": "杭州萧山",

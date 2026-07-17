@@ -6,7 +6,7 @@
 
 - 出发优先级：杭州萧山 > 上海浦东/虹桥 > 宁波/义乌 > 南京/温州/无锡/台州。
 - 国内、国际目的地均不限；一次任务扫描一个机场，32 个时段构成加权循环。
-- Travelpayouts / Aviasales Data API 发现任意目的地的近期缓存低价。
+- Travelpayouts / Aviasales Data API 同时查询中国、美国和新加坡市场，发现任意目的地的近期缓存低价。
 - 缓存单人价不超过 ¥300 才进入通知；两人估算总价按单人价乘以 2 展示。
 - 行李、两张座位和最终含税结算价均标注为“下单前确认”。
 - 同一航班不会重复轰炸微信；降价至少 ¥1，或消失 24 小时后重新出现，才再次推送。
@@ -91,6 +91,7 @@ python -m flight_monitor.app
 - `max_price_per_adult`：每人最高含税价，当前为 300。
 - `days_ahead`：未来监控天数，当前为 180。
 - `origin_cycle`：机场加权循环；重复越多，扫描优先级越高。
+- `travelpayouts_markets`：并行查询的市场缓存，默认 `cn`、`us`、`sg`。
 - `candidate_recheck_minutes`：同一路线日期的实时复核间隔。
 - `max_candidates_to_verify_per_run`：每轮最多实时复核数量。
 

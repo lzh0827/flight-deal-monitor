@@ -1,7 +1,9 @@
 name: 低价机票监控
 
 on:
-  # 暂停定时任务：当前缓存数据源不能保证两张票仍可购买。
+  schedule:
+    # 避开整点高峰；GitHub 定时任务可能有几分钟延迟。
+    - cron: "7,22,37,52 * * * *"
   workflow_dispatch:
     inputs:
       dry_run:
