@@ -1,0 +1,30 @@
+{
+  "currency": "CNY",
+  "adults": 2,
+  "max_price_per_adult": 300,
+  "days_ahead": 180,
+  "departure_start_offset_days": 1,
+  "max_candidates_to_verify_per_run": 4,
+  "candidate_recheck_minutes": 180,
+  "notification_price_drop_cny": 1,
+  "renotify_after_missing_hours": 24,
+  "request_timeout_seconds": 25,
+  "state_file": "state/monitor-state.json",
+  "airport_names": {
+    "HGH": "杭州萧山",
+    "PVG": "上海浦东",
+    "SHA": "上海虹桥",
+    "NGB": "宁波栎社",
+    "YIW": "义乌",
+    "NKG": "南京禄口",
+    "WNZ": "温州龙湾",
+    "WUX": "无锡硕放",
+    "HYN": "台州路桥"
+  },
+  "origin_cycle": [
+    "HGH", "SHA", "HGH", "PVG", "HGH", "NGB", "HGH", "SHA",
+    "HGH", "PVG", "HGH", "YIW", "HGH", "SHA", "HGH", "PVG",
+    "HGH", "NKG", "HGH", "SHA", "HGH", "PVG", "HGH", "WNZ",
+    "HGH", "SHA", "HGH", "PVG", "HGH", "WUX", "HGH", "HYN"
+  ]
+}

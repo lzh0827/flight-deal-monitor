@@ -1,0 +1,88 @@
+from __future__ import annotations
+
+import argparse
+import logging
+import os
+import sys
+from datetime import datetime
+from pathlib import Path
+from zoneinfo import ZoneInfo
+
+from .config import load_settings
+from .http import build_session
+from .monitor import DealMonitor
+from .notify import PushPlusNotifier
+from .providers.amadeus import AmadeusClient
+from .providers.travelpayouts import TravelpayoutsDiscovery
+from .state import MonitorState
+
+
+def _required_env(name: str) -> str:
+    value = os.getenv(name, "").strip()
+    if not value:
+        raise RuntimeError(f"缺少环境变量 {name}")
+    return value
+
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    project_root = Path(__file__).resolve().parents[2]
+    parser = argparse.ArgumentParser(description="低价机票监控器")
+    parser.add_argument(
+        "--config", type=Path, default=project_root / "config.json", help="配置文件"
+    )
+    parser.add_argument("--dry-run", action="store_true", help="搜索但不推送、不保存状态")
+    parser.add_argument(
+        "--test-notification", action="store_true", help="只测试 PushPlus 微信通知"
+    )
+    return parser.parse_args(argv)
+
+
+def main(argv: list[str] | None = None) -> int:
+    logging.basicConfig(
+        level=os.getenv("LOG_LEVEL", "INFO"),
+        format="%(asctime)s %(levelname)s %(name)s - %(message)s",
+    )
+    args = parse_args(argv)
+    try:
+        settings = load_settings(args.config.resolve())
+        session = build_session()
+        notifier = PushPlusNotifier(
+            _required_env("PUSHPLUS_TOKEN"), settings.request_timeout_seconds, session
+        )
+        if args.test_notification:
+            notifier.send_test()
+            print("PushPlus 测试消息已提交，请检查微信。")
+            return 0
+
+        amadeus = AmadeusClient(
+            _required_env("AMADEUS_CLIENT_ID"),
+            _required_env("AMADEUS_CLIENT_SECRET"),
+            settings.amadeus_environment,
+            settings.request_timeout_seconds,
+            session,
+        )
+        providers = []
+        travelpayouts_token = os.getenv("TRAVELPAYOUTS_TOKEN", "").strip()
+        if travelpayouts_token:
+            providers.append(
+                TravelpayoutsDiscovery(
+                    travelpayouts_token, settings.request_timeout_seconds, session
+                )
+            )
+        else:
+            providers.append(amadeus)
+            logging.warning("未配置 TRAVELPAYOUTS_TOKEN，将用 Amadeus 缓存发现候选")
+
+        state = MonitorState(settings.state_file)
+        state.load()
+        monitor = DealMonitor(settings, providers, amadeus, notifier, state)
+        monitor.run(datetime.now(ZoneInfo("Asia/Shanghai")), dry_run=args.dry_run)
+        return 0
+    except Exception as exc:
+        logging.exception("监控运行失败")
+        print(f"错误：{exc}", file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
