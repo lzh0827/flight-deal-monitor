@@ -1,9 +1,7 @@
 name: 低价机票监控
 
 on:
-  schedule:
-    # 避开整点高峰；GitHub 定时任务可能有几分钟延迟。
-    - cron: "7,22,37,52 * * * *"
+  # 配齐 Amadeus 生产凭证后恢复每 15 分钟的 schedule。
   workflow_dispatch:
     inputs:
       dry_run:
