@@ -13,6 +13,11 @@ on:
         required: false
         default: false
         type: boolean
+      notify_lowest_test:
+        description: "推送本轮发现的最低缓存价格（一次性测试）"
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -67,6 +72,7 @@ jobs:
         run: >-
           python -m flight_monitor.app
           ${{ (github.event_name == 'workflow_dispatch' && inputs.dry_run) && '--dry-run' || '' }}
+          ${{ (github.event_name == 'workflow_dispatch' && inputs.notify_lowest_test) && '--notify-lowest-test' || '' }}
 
       - name: 保存去重状态
         if: ${{ always() && hashFiles('state/monitor-state.json') != '' }}

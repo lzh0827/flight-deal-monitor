@@ -40,6 +40,13 @@ class Notifier(Protocol):
         self, deal: FlightDeal, airport_names: dict[str, str], now: datetime
     ) -> None: ...
 
+    def send_lowest_test(
+        self,
+        deal: FlightDeal | None,
+        airport_names: dict[str, str],
+        now: datetime,
+    ) -> None: ...
+
 
 def origins_for_time(
     now: datetime,
@@ -87,7 +94,12 @@ class DealMonitor:
         self.notifier = notifier
         self.state = state
 
-    def run(self, now: datetime, dry_run: bool = False) -> list[FlightDeal]:
+    def run(
+        self,
+        now: datetime,
+        dry_run: bool = False,
+        notify_lowest_test: bool = False,
+    ) -> list[FlightDeal]:
         origins = origins_for_time(
             now,
             self.settings.every_run_origins,
@@ -98,6 +110,11 @@ class DealMonitor:
         logger.info("本轮扫描 %s，日期 %s 至 %s", "、".join(origins), start, end)
 
         groups: list[list[Candidate]] = []
+        discovery_price_limit = (
+            Decimal("999999999")
+            if notify_lowest_test
+            else self.settings.max_price_per_adult
+        )
         for origin in origins:
             for provider in self.discovery_providers:
                 try:
@@ -105,7 +122,7 @@ class DealMonitor:
                         origin,
                         start,
                         end,
-                        self.settings.max_price_per_adult,
+                        discovery_price_limit,
                         self.settings.currency,
                     )
                     logger.info(
@@ -122,8 +139,28 @@ class DealMonitor:
                         type(provider).__name__,
                     )
 
+        merged_candidates = merge_candidates(groups)
+        if notify_lowest_test:
+            test_deal: FlightDeal | None = None
+            if merged_candidates:
+                candidate, sources = merged_candidates[0]
+                test_deal = self.verifier.verify(
+                    candidate,
+                    self.settings.adults,
+                    Decimal("999999999"),
+                    Decimal("999999999"),
+                    self.settings.currency,
+                    sources,
+                )
+            if not dry_run:
+                self.notifier.send_lowest_test(
+                    test_deal, self.settings.airport_names, now
+                )
+            logger.info("最低价测试完成：%s", test_deal.fingerprint if test_deal else "无结果")
+            return [test_deal] if test_deal else []
+
         candidates = []
-        for candidate, sources in merge_candidates(groups):
+        for candidate, sources in merged_candidates:
             if self.state.should_verify_candidate(
                 candidate.origin,
                 candidate.destination,

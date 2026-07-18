@@ -34,6 +34,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--test-notification", action="store_true", help="只测试 PushPlus 微信通知"
     )
+    parser.add_argument(
+        "--notify-lowest-test",
+        action="store_true",
+        help="扫描一次并推送本轮发现的最低缓存价格",
+    )
     return parser.parse_args(argv)
 
 
@@ -70,7 +75,11 @@ def main(argv: list[str] | None = None) -> int:
         monitor = DealMonitor(
             settings, providers, CachedFareVerifier(), notifier, state
         )
-        monitor.run(datetime.now(ZoneInfo("Asia/Shanghai")), dry_run=args.dry_run)
+        monitor.run(
+            datetime.now(ZoneInfo("Asia/Shanghai")),
+            dry_run=args.dry_run,
+            notify_lowest_test=args.notify_lowest_test,
+        )
         return 0
     except Exception as exc:
         logging.exception("监控运行失败")
