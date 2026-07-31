@@ -6,7 +6,7 @@
   "notification_drop_per_adult": 50,
   "default_comparison_baseline_per_adult": 270,
   "request_timeout_seconds": 25,
-  "queries_per_run": 9,
+  "queries_per_run": 23,
   "travelpayouts_markets": ["cn", "us", "sg"],
   "state_file": "state/chaoshan-trip-monitor-state.json",
   "departure_airports": ["NGB", "HGH", "SHA", "PVG", "YIW", "WUX", "NKG", "WNZ", "HYN"],

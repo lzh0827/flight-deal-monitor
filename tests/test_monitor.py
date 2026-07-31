@@ -40,6 +40,7 @@ class MonitorTests(unittest.TestCase):
         settings = load_settings(Path(__file__).parents[1] / "config.json")
         self.assertEqual(settings.adults, 3)
         self.assertEqual(settings.required_baggage_kg, 20)
+        self.assertEqual(settings.queries_per_run, 23)
         self.assertEqual(len(settings.search_tasks()), 45)
         self.assertIn("SWA", settings.arrival_airports)
         self.assertIn("FUO", settings.arrival_airports)
@@ -55,6 +56,19 @@ class MonitorTests(unittest.TestCase):
         selected = queries_for_time(now, tasks, 9)
         self.assertEqual(len(selected), 9)
         self.assertEqual(len(set(selected)), 9)
+
+    def test_two_23_task_runs_cover_all_45_tasks(self) -> None:
+        tasks = tuple(
+            SearchTask("去程", f"A{i}", date(2026, 8, 30), ("SWA",))
+            for i in range(45)
+        )
+        first_time = datetime(
+            2026, 7, 31, 12, 0, tzinfo=timezone(timedelta(hours=8))
+        )
+        second_time = first_time + timedelta(minutes=15)
+        covered = set(queries_for_time(first_time, tasks, 23))
+        covered.update(queries_for_time(second_time, tasks, 23))
+        self.assertEqual(covered, set(tasks))
 
     def test_cached_fare_uses_three_adults(self) -> None:
         candidate = Candidate(
