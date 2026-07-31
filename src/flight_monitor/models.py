@@ -47,3 +47,25 @@ class FlightDeal:
             f"{self.origin}-{self.destination}-"
             f"{self.departure_at.isoformat()}-{flights}"
         )
+
+
+@dataclass(frozen=True)
+class RoundTripDeal:
+    origin: str
+    destination: str
+    outbound_date: date
+    return_date: date
+    displayed_price_per_adult: Decimal
+    currency: str
+    adults: int
+    flight_numbers: tuple[str, ...]
+    stops: int
+    source: str
+    comparison_url: str
+
+    @property
+    def key(self) -> str:
+        return (
+            f"{self.origin}-{self.destination}-"
+            f"{self.outbound_date.isoformat()}-{self.return_date.isoformat()}"
+        )

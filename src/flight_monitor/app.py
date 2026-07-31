@@ -9,11 +9,13 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from .config import load_settings
+from .google_monitor import run_google_flights_monitor
 from .http import build_session
 from .monitor import DealMonitor
 from .notify import PushPlusNotifier
 from .providers.cached import CachedFareVerifier
 from .providers.travelpayouts import TravelpayoutsDiscovery
+from .providers.serpapi import SerpApiGoogleFlights
 from .state import MonitorState
 
 
@@ -34,6 +36,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--initialize-baseline",
         action="store_true",
         help="扫描并保存当前观察价作为基线，不发送低价提醒",
+    )
+    parser.add_argument(
+        "--force-google-flights",
+        action="store_true",
+        help="立即执行Google Flights往返扫描并推送当前低价榜",
     )
     parser.add_argument("--scan-all", action="store_true", help="本轮扫描全部任务")
     parser.add_argument(
@@ -77,13 +84,33 @@ def main(argv: list[str] | None = None) -> int:
         monitor = DealMonitor(
             settings, providers, CachedFareVerifier(), notifier, state
         )
+        now = datetime.now(ZoneInfo("Asia/Shanghai"))
         monitor.run(
-            datetime.now(ZoneInfo("Asia/Shanghai")),
+            now,
             dry_run=args.dry_run,
             initialize_baseline=args.initialize_baseline,
             scan_all=args.scan_all,
             notify_top=max(0, args.notify_top),
         )
+        serpapi_key = os.getenv("SERPAPI_KEY", "").strip()
+        if serpapi_key:
+            run_google_flights_monitor(
+                now,
+                settings,
+                SerpApiGoogleFlights(
+                    serpapi_key, settings.request_timeout_seconds, session
+                ),
+                notifier,
+                state,
+                force=args.force_google_flights,
+                dry_run=args.dry_run,
+            )
+        elif args.force_google_flights:
+            raise RuntimeError(
+                "缺少 SERPAPI_KEY；请先将密钥保存为GitHub Actions仓库Secret"
+            )
+        else:
+            logging.info("未配置SERPAPI_KEY，Google Flights数据源自动跳过")
         return 0
     except Exception as exc:
         logging.exception("监控运行失败")

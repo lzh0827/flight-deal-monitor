@@ -23,6 +23,11 @@ on:
         required: false
         default: false
         type: boolean
+      force_google_flights:
+        description: "立即查询Google Flights并推送当前往返低价榜"
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -41,6 +46,7 @@ jobs:
     env:
       TRAVELPAYOUTS_TOKEN: ${{ secrets.TRAVELPAYOUTS_TOKEN }}
       PUSHPLUS_TOKEN: ${{ secrets.PUSHPLUS_TOKEN }}
+      SERPAPI_KEY: ${{ secrets.SERPAPI_KEY }}
       PYTHONUNBUFFERED: "1"
 
     steps:
@@ -79,9 +85,10 @@ jobs:
           ${{ (github.event_name == 'workflow_dispatch' && inputs.dry_run) && '--dry-run' || '' }}
           ${{ (github.event_name == 'workflow_dispatch' && inputs.initialize_baseline) && '--initialize-baseline --scan-all' || '' }}
           ${{ (github.event_name == 'workflow_dispatch' && inputs.notify_top_10) && '--notify-top 10 --scan-all' || '' }}
+          ${{ (github.event_name == 'workflow_dispatch' && inputs.force_google_flights) && '--force-google-flights' || '' }}
 
       - name: 保存去重状态
-        if: ${{ always() && hashFiles('state/monitor-state.json') != '' }}
+        if: ${{ always() && hashFiles('state/*.json') != '' }}
         uses: actions/cache/save@v4
         with:
           path: state

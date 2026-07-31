@@ -7,7 +7,7 @@ from urllib.parse import quote
 import requests
 
 from .config import Settings
-from .models import FlightDeal
+from .models import FlightDeal, RoundTripDeal
 
 
 class PushPlusNotifier:
@@ -124,6 +124,68 @@ class PushPlusNotifier:
         self._send(
             f"潮汕机票低价榜：当前{len(deals)}条候选",
             "\n".join(lines),
+        )
+
+    def send_google_roundtrip_digest(
+        self,
+        deals: list[RoundTripDeal],
+        airport_names: dict[str, str],
+        now: datetime,
+        title_prefix: str = "Google Flights往返低价榜",
+    ) -> None:
+        ranked = sorted(deals, key=lambda item: item.displayed_price_per_adult)[:10]
+        lines = ["## ✈️ Google Flights 往返低价候选", ""]
+        if not ranked:
+            lines.append("本轮没有返回符合机场和日期范围的候选。")
+        for index, deal in enumerate(ranked, start=1):
+            origin = airport_names.get(deal.origin, deal.origin)
+            destination = airport_names.get(deal.destination, deal.destination)
+            stops = "直飞" if deal.stops == 0 else f"中转{deal.stops}次"
+            lines.append(
+                f"{index}. **{origin}→{destination}**｜"
+                f"{deal.outbound_date.strftime('%m-%d')}去 / {deal.return_date.strftime('%m-%d')}回｜"
+                f"展示价¥{deal.displayed_price_per_adult:.0f}/人｜{stops}"
+            )
+        lines.extend(
+            [
+                "",
+                f"扫描时间：{now.strftime('%Y-%m-%d %H:%M:%S')}（北京时间）",
+                "",
+                "> 这是按3名成人搜索时Google Flights显示的往返候选价。返程班次、3张余票、税费以及每人20kg托运行李均须进入结果页和最终支付页确认。",
+            ]
+        )
+        if ranked and ranked[0].comparison_url:
+            lines.extend(["", f"[打开Google Flights核价]({ranked[0].comparison_url})"])
+        self._send(f"{title_prefix}：{len(ranked)}条候选", "\n".join(lines))
+
+    def send_google_drop(
+        self,
+        deal: RoundTripDeal,
+        airport_names: dict[str, str],
+        baseline: Decimal,
+        now: datetime,
+    ) -> None:
+        origin = airport_names.get(deal.origin, deal.origin)
+        destination = airport_names.get(deal.destination, deal.destination)
+        drop = baseline - deal.displayed_price_per_adult
+        content = "\n".join(
+            [
+                "## ✈️ Google Flights 往返价刷新历史低价",
+                "",
+                f"- **航线**：{origin}（{deal.origin}）→ {destination}（{deal.destination}）",
+                f"- **日期**：{deal.outbound_date.isoformat()}去 / {deal.return_date.isoformat()}回",
+                f"- **当前展示价**：¥{deal.displayed_price_per_adult:.0f}/人",
+                f"- **首次观察基准**：¥{baseline:.0f}/人，已下降¥{drop:.0f}/人",
+                f"- **发现时间**：{now.strftime('%Y-%m-%d %H:%M:%S')}（北京时间）",
+                "",
+                f"[打开Google Flights核价]({deal.comparison_url})",
+                "",
+                "> 请确认三人同价、完整往返班次、税费和每人20kg托运行李；API展示价不是最终支付价。",
+            ]
+        )
+        self._send(
+            f"Google往返降价：{deal.origin}→{deal.destination} ¥{deal.displayed_price_per_adult:.0f}/人",
+            content,
         )
 
     def _comparison_links(self, deal: FlightDeal) -> list[tuple[str, str]]:

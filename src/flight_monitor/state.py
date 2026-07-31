@@ -5,7 +5,7 @@ from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
 
-from .models import FlightDeal
+from .models import FlightDeal, RoundTripDeal
 
 
 def route_key(deal: FlightDeal) -> str:
@@ -25,7 +25,12 @@ class MonitorState:
         self.path = path
         self.known_baselines = known_baselines
         self.default_comparison_baseline = default_comparison_baseline
-        self.data: dict = {"version": 2, "routes": {}}
+        self.data: dict = {
+            "version": 2,
+            "routes": {},
+            "google_roundtrips": {},
+            "google_slots": {},
+        }
 
     def load(self) -> None:
         if not self.path.exists():
@@ -34,6 +39,8 @@ class MonitorState:
             loaded = json.loads(self.path.read_text(encoding="utf-8"))
             if loaded.get("version") == 2 and isinstance(loaded.get("routes"), dict):
                 self.data = loaded
+                self.data.setdefault("google_roundtrips", {})
+                self.data.setdefault("google_slots", {})
         except (OSError, ValueError, TypeError):
             backup = self.path.with_suffix(".corrupt.json")
             try:
@@ -80,6 +87,49 @@ class MonitorState:
                 "lowest_price_per_adult": str(price),
                 "last_seen_at": now.isoformat(),
                 "last_notified_at": now.isoformat() if notified else None,
+            }
+            return
+        record["last_seen_at"] = now.isoformat()
+        if price < Decimal(str(record["lowest_price_per_adult"])):
+            record["lowest_price_per_adult"] = str(price)
+        if notified:
+            record["last_notified_at"] = now.isoformat()
+
+    def google_slot_completed(self, slot: str) -> bool:
+        return slot in self.data["google_slots"]
+
+    def mark_google_slot_completed(self, slot: str, now: datetime) -> None:
+        self.data["google_slots"][slot] = now.isoformat()
+
+    def should_notify_google(
+        self, deal: RoundTripDeal, minimum_drop: Decimal
+    ) -> bool:
+        record = self.data["google_roundtrips"].get(deal.key)
+        if record is None:
+            return False
+        price = deal.displayed_price_per_adult
+        baseline = Decimal(str(record["baseline_price_per_adult"]))
+        previous_low = Decimal(str(record["lowest_price_per_adult"]))
+        return price < previous_low and price <= baseline - minimum_drop
+
+    def google_baseline(self, deal: RoundTripDeal) -> Decimal:
+        record = self.data["google_roundtrips"].get(deal.key)
+        if record is None:
+            return deal.displayed_price_per_adult
+        return Decimal(str(record["baseline_price_per_adult"]))
+
+    def mark_google_seen(
+        self, deal: RoundTripDeal, now: datetime, notified: bool
+    ) -> None:
+        records = self.data["google_roundtrips"]
+        price = deal.displayed_price_per_adult
+        record = records.get(deal.key)
+        if record is None:
+            records[deal.key] = {
+                "baseline_price_per_adult": str(price),
+                "lowest_price_per_adult": str(price),
+                "last_seen_at": now.isoformat(),
+                "last_notified_at": None,
             }
             return
         record["last_seen_at"] = now.isoformat()

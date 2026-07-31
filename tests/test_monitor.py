@@ -8,10 +8,12 @@ from decimal import Decimal
 from pathlib import Path
 
 from flight_monitor.config import SearchTask, load_settings
-from flight_monitor.models import Candidate, FlightDeal
+from flight_monitor.google_monitor import google_schedule_slot, roundtrip_date_pairs
+from flight_monitor.models import Candidate, FlightDeal, RoundTripDeal
 from flight_monitor.monitor import merge_candidates, queries_for_time
 from flight_monitor.providers.cached import CachedFareVerifier
 from flight_monitor.providers.travelpayouts import TravelpayoutsDiscovery
+from flight_monitor.providers.serpapi import SerpApiGoogleFlights
 from flight_monitor.state import MonitorState, route_key
 
 
@@ -37,6 +39,78 @@ def sample_deal(price: str = "270", origin: str = "NGB", destination: str = "SWA
 
 
 class MonitorTests(unittest.TestCase):
+    def test_serpapi_uses_one_multi_airport_query_and_parses_result(self) -> None:
+        class FakeResponse:
+            def raise_for_status(self) -> None:
+                return None
+
+            def json(self) -> dict:
+                return {
+                    "search_metadata": {
+                        "google_flights_url": "https://www.google.com/travel/flights/test"
+                    },
+                    "best_flights": [
+                        {
+                            "price": 688,
+                            "flights": [
+                                {
+                                    "departure_airport": {"id": "NGB"},
+                                    "arrival_airport": {"id": "SWA"},
+                                    "flight_number": "9C 7611",
+                                }
+                            ],
+                        }
+                    ],
+                    "other_flights": [],
+                }
+
+        class FakeSession:
+            def __init__(self) -> None:
+                self.params: dict = {}
+
+            def get(self, url: str, **kwargs: object) -> FakeResponse:
+                self.params = kwargs["params"]  # type: ignore[assignment]
+                return FakeResponse()
+
+        session = FakeSession()
+        provider = SerpApiGoogleFlights("secret", 10, session)  # type: ignore[arg-type]
+        deals = provider.search_roundtrip(
+            ("NGB", "HGH"),
+            ("SWA", "CAN"),
+            date(2026, 8, 30),
+            date(2026, 9, 2),
+            3,
+            "CNY",
+        )
+        self.assertEqual(session.params["departure_id"], "NGB,HGH")
+        self.assertEqual(session.params["arrival_id"], "SWA,CAN")
+        self.assertEqual(session.params["adults"], 3)
+        self.assertEqual(deals[0].displayed_price_per_adult, Decimal("688"))
+
+    def test_google_schedule_and_four_trip_combinations(self) -> None:
+        settings = load_settings(Path(__file__).parents[1] / "config.json")
+        self.assertEqual(len(roundtrip_date_pairs(settings)), 4)
+        self.assertEqual(
+            google_schedule_slot(datetime(2026, 8, 1, 8, 30)),
+            "2026-08-01-am",
+        )
+        self.assertIsNone(google_schedule_slot(datetime(2026, 8, 1, 14, 0)))
+
+    def test_google_roundtrip_alerts_after_fifty_yuan_drop(self) -> None:
+        state = MonitorState(Path("unused"), {})
+        now = datetime(2026, 7, 31, 12, 0)
+
+        def deal(price: str) -> RoundTripDeal:
+            return RoundTripDeal(
+                "NGB", "SWA", date(2026, 8, 30), date(2026, 9, 2),
+                Decimal(price), "CNY", 3, ("9C 7611",), 0,
+                "Google Flights（SerpApi）", "https://example.com"
+            )
+
+        state.mark_google_seen(deal("700"), now, False)
+        self.assertFalse(state.should_notify_google(deal("651"), Decimal("50")))
+        self.assertTrue(state.should_notify_google(deal("650"), Decimal("50")))
+
     def test_travelpayouts_queries_each_destination_explicitly(self) -> None:
         class FakeResponse:
             def __init__(self, destination: str) -> None:
