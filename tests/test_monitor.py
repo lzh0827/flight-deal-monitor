@@ -91,6 +91,15 @@ class MonitorTests(unittest.TestCase):
         self.assertFalse(state.should_notify(sample_deal("220"), Decimal("50")))
         self.assertTrue(state.should_notify(sample_deal("219"), Decimal("50")))
 
+    def test_first_seen_route_alerts_if_below_global_270_reference(self) -> None:
+        state = MonitorState(Path("unused"), {}, Decimal("270"))
+        self.assertFalse(
+            state.should_notify(sample_deal("221", origin="YIW"), Decimal("50"))
+        )
+        self.assertTrue(
+            state.should_notify(sample_deal("220", origin="YIW"), Decimal("50"))
+        )
+
     def test_state_saves_version_two(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "state.json"

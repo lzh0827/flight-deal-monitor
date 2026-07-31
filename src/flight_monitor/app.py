@@ -62,7 +62,11 @@ def main(argv: list[str] | None = None) -> int:
             )
             for market in settings.travelpayouts_markets
         ]
-        state = MonitorState(settings.state_file, settings.known_baselines)
+        state = MonitorState(
+            settings.state_file,
+            settings.known_baselines,
+            settings.default_comparison_baseline_per_adult,
+        )
         state.load()
         monitor = DealMonitor(
             settings, providers, CachedFareVerifier(), notifier, state

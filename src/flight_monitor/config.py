@@ -22,6 +22,7 @@ class Settings:
     required_baggage_kg: int
     max_observed_price_per_adult: Decimal
     notification_drop_per_adult: Decimal
+    default_comparison_baseline_per_adult: Decimal
     request_timeout_seconds: int
     queries_per_run: int
     travelpayouts_markets: tuple[str, ...]
@@ -75,6 +76,9 @@ def load_settings(path: Path) -> Settings:
         ),
         notification_drop_per_adult=Decimal(
             str(data["notification_drop_per_adult"])
+        ),
+        default_comparison_baseline_per_adult=Decimal(
+            str(data["default_comparison_baseline_per_adult"])
         ),
         request_timeout_seconds=int(data["request_timeout_seconds"]),
         queries_per_run=int(data["queries_per_run"]),

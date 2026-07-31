@@ -16,9 +16,15 @@ def route_key(deal: FlightDeal) -> str:
 
 
 class MonitorState:
-    def __init__(self, path: Path, known_baselines: dict[str, Decimal]) -> None:
+    def __init__(
+        self,
+        path: Path,
+        known_baselines: dict[str, Decimal],
+        default_comparison_baseline: Decimal | None = None,
+    ) -> None:
         self.path = path
         self.known_baselines = known_baselines
+        self.default_comparison_baseline = default_comparison_baseline
         self.data: dict = {"version": 2, "routes": {}}
 
     def load(self) -> None:
@@ -40,7 +46,12 @@ class MonitorState:
         record = self.data["routes"].get(key)
         configured = self.known_baselines.get(key)
         if record is None:
-            return (configured or deal.price_per_adult), None
+            return (
+                configured
+                or self.default_comparison_baseline
+                or deal.price_per_adult,
+                None,
+            )
         return (
             Decimal(str(record["baseline_price_per_adult"])),
             Decimal(str(record["lowest_price_per_adult"])),
@@ -49,7 +60,11 @@ class MonitorState:
     def should_notify(self, deal: FlightDeal, minimum_drop: Decimal) -> bool:
         baseline, previous_low = self.prices(deal)
         if previous_low is None and route_key(deal) not in self.known_baselines:
-            return False
+            return (
+                self.default_comparison_baseline is not None
+                and deal.price_per_adult
+                <= self.default_comparison_baseline - minimum_drop
+            )
         is_new_low = previous_low is None or deal.price_per_adult < previous_low
         return is_new_low and deal.price_per_adult <= baseline - minimum_drop
 

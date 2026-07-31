@@ -4,6 +4,7 @@
   "required_baggage_kg": 20,
   "max_observed_price_per_adult": 2000,
   "notification_drop_per_adult": 50,
+  "default_comparison_baseline_per_adult": 270,
   "request_timeout_seconds": 25,
   "queries_per_run": 9,
   "travelpayouts_markets": ["cn", "us", "sg"],
