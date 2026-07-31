@@ -1,99 +1,44 @@
-# 低价机票微信监控器
+# 2026 潮汕行程机票微信监控
 
-每 15 分钟在云端执行一次，分批扫描未来 180 天内从杭州、上海及周边机场出发的单程经济舱。当 Aviasales Data API 的近期缓存搜索记录显示 **每名成人不超过 ¥300、两人估算总价不超过 ¥600** 时，通过 PushPlus 推送到微信，并要求用户在下单前复核实时价格和座位。
+为 3 名成人/学生监控 2026 年 8 月 30–31 日去程和 9 月 2–4 日返程。三人均需各 20kg 托运行李。
 
-## 已落实的需求
+## 覆盖范围
 
-- 出发优先级：杭州萧山 > 上海浦东/虹桥 > 宁波/义乌 > 南京/温州/无锡/台州。
-- 国内、国际目的地均不限；HGH、SHA、PVG 每 15 分钟都扫描，其他机场每轮轮换一个。
-- Travelpayouts / Aviasales Data API 同时查询中国、美国和新加坡市场，发现任意目的地的近期缓存低价。
-- 缓存单人价不超过 ¥300 才进入通知；两人估算总价按单人价乘以 2 展示。
-- 行李、两张座位和最终含税结算价均标注为“下单前确认”。
-- 同一航班不会重复轰炸微信；降价至少 ¥1，或消失 24 小时后重新出现，才再次推送。
-- 候选航线默认 3 小时复核一次，以控制免费 API 用量；每轮最多复核 4 个候选。
-- 查询与通知密钥放在 GitHub Secrets；触发令牌放在 Cloudflare Worker Secret，均不写进代码或配置文件。
+- 北方出发/返程机场：宁波、杭州、上海虹桥、上海浦东、义乌、无锡、南京、温州、台州。
+- 潮汕及备选机场：揭阳潮汕、梅州、厦门、泉州、广州、深圳、惠州、珠海、佛山。
+- 共 45 个“出发机场 + 日期”查询任务；每 15 分钟运行 9 个任务，约 75 分钟完整覆盖一次。
+- 每个任务并行查看 Aviasales 的中国、美国和新加坡市场近期搜索缓存。
 
-## 必须知道的边界
+## 提醒规则
 
-这不是对携程、飞猪、同程页面进行违规爬取的程序。航空价格接口不可能免费、合法且完整覆盖所有中国 OTA：
+- 每条“出发机场—到达机场—日期”路线首次观察到的价格作为基准，不推送。
+- 之后只有同时满足“刷新本路线历史最低”和“比初始基准低至少 ¥50/人”才微信提醒。
+- 宁波—揭阳 2026-08-30 使用用户已知的 ¥270/人最终实付价作为基准。
+- 使用独立的 v2 状态文件，不继承旧版任意目的地监控的去重记录。
 
-- Travelpayouts 价格来自 Aviasales 用户最近搜索形成的缓存，通常保存 2–7 天，不是实时库存。
-- 推送不代表当前仍有两张票，也不能保证付款页最终含税价不超过 ¥300/人。
-- 青年/学生专享价不一定进入公开缓存，程序不会伪装学生身份。
-- 推送中的 Aviasales 和 Google Flights 链接只用于人工复核；付款前必须检查两名成人总价、座位、行李和退改规则。
+## 价格边界
 
-代码已做成可扩展结构。以后取得 Skyscanner、航司或其他正规 API 权限后，可在 `src/flight_monitor/providers/` 增加数据源，不需要重写通知和去重逻辑。
+Travelpayouts/Aviasales Data API 是近期用户搜索缓存，不是实时库存，也不提供可靠的行李与优惠券结算信息。微信消息会附携程、去哪儿、飞猪、Google Flights、春秋官网及 Aviasales 的复核入口。付款前必须确认：
 
-## 免费云端方案
+- 三名成人同一航班仍有票；
+- 最终价包含税费、燃油附加费；
+- 每人 20kg 托运行李；
+- 学生/青年优惠和优惠券真实可用；
+- 中转、退改规则与机场地面接驳成本可接受。
 
-监控程序在公开 GitHub 仓库的标准托管运行器执行，由 Cloudflare Worker Cron 每 15 分钟调用一次 `workflow_dispatch`。这样不依赖 GitHub 自带、可能延迟或漏触发的定时器。
+## 云端运行
 
-Cloudflare Worker 每 15 分钟唤醒一次；代码在北京时间 01:00–06:59 跳过 GitHub 调用，07:00 恢复。Worker 使用仅限本仓库且只有 Actions 写权限的精细化 GitHub 令牌。
+GitHub Actions 执行查询并通过 PushPlus 发微信通知，Cloudflare Worker 每 15 分钟触发工作流。密钥只保存在 GitHub/Cloudflare Secrets 中。
 
-## 第一步：申请两个免费凭证
-
-### 1. PushPlus 微信通知
-
-1. 打开 [PushPlus 官网](https://www.pushplus.plus/)，使用微信登录。
-2. 关注其微信公众号并完成绑定。
-3. 在个人中心复制“消息 token”（推荐单独创建一个机票监控消息 token）。
-4. 记为 `PUSHPLUS_TOKEN`。
-
-### 2. Travelpayouts 低价发现
-
-1. 注册 [Travelpayouts](https://www.travelpayouts.com/)。
-2. 打开开发者/API 页面申请 Data API token。
-3. 记为 `TRAVELPAYOUTS_TOKEN`。
-
-这是运行价格发现所必需的 token。
-
-## 第二步：部署到 GitHub
-
-1. 新建一个公开仓库，例如 `flight-deal-monitor`。
-2. 将 `flight-deal-monitor` 目录**里面的全部文件**上传到仓库根目录；上传后应能直接看到 `README.md`、`config.json` 和 `.github`。
-3. 打开仓库 `Settings → Secrets and variables → Actions`。
-4. 新增两个 Repository secrets：
-
-   - `PUSHPLUS_TOKEN`
-   - `TRAVELPAYOUTS_TOKEN`
-
-5. 打开 `Actions → 低价机票监控 → Run workflow`，先勾选“只测试微信通知”。
-6. 微信收到测试消息后，再手动运行一次正常监控。
-7. 后续工作流会在每小时第 7、22、37、52 分钟自动运行。
-
-状态通过 GitHub Actions Cache 保存，不会提交到公开仓库。若缓存被平台清理，最坏结果是少量旧优惠可能重新通知一次，不影响价格判断。
-
-## 本地测试（可选）
-
-PowerShell：
+手动初始化全部路线基线：
 
 ```powershell
-cd C:\path\to\flight-deal-monitor
-python -m venv .venv
-.venv\Scripts\Activate.ps1
-pip install -e .
-$env:TRAVELPAYOUTS_TOKEN="你的Token"
-$env:PUSHPLUS_TOKEN="你的Token"
-python -m flight_monitor.app --test-notification
-python -m flight_monitor.app --dry-run
+python -m flight_monitor.app --initialize-baseline --scan-all
 ```
 
-正式执行：
+运行测试：
 
 ```powershell
-python -m flight_monitor.app
+$env:PYTHONPATH = (Resolve-Path .\src).Path
+python -m unittest discover -s tests -v
 ```
-
-## 调整规则
-
-编辑 `config.json`：
-
-- `max_price_per_adult`：每人最高含税价，当前为 300。
-- `days_ahead`：未来监控天数，当前为 180。
-- `every_run_origins`：每轮都扫描的机场，当前为 HGH、SHA、PVG。
-- `rotating_origins`：低优先级轮换机场，当前每轮扫描其中一个。
-- `travelpayouts_markets`：并行查询的市场缓存，默认 `cn`、`us`、`sg`。
-- `candidate_recheck_minutes`：同一路线日期的实时复核间隔。
-- `max_candidates_to_verify_per_run`：每轮最多实时复核数量。
-
-不要把任何 token 或 secret 写入 `config.json`。

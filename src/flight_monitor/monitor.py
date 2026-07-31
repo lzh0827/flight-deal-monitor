@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import logging
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Protocol
 
-from .config import Settings
+from .config import SearchTask, Settings
 from .models import Candidate, FlightDeal
 from .state import MonitorState
 
@@ -16,8 +16,8 @@ class DiscoveryProvider(Protocol):
     def discover(
         self,
         origin: str,
-        start: date,
-        end: date,
+        departure_date: date,
+        destinations: tuple[str, ...],
         max_price: Decimal,
         currency: str,
     ) -> list[Candidate]: ...
@@ -28,7 +28,6 @@ class Verifier(Protocol):
         self,
         candidate: Candidate,
         adults: int,
-        max_total: Decimal,
         max_per_adult: Decimal,
         currency: str,
         discovery_sources: tuple[str, ...],
@@ -37,45 +36,40 @@ class Verifier(Protocol):
 
 class Notifier(Protocol):
     def send_deal(
-        self, deal: FlightDeal, airport_names: dict[str, str], now: datetime
-    ) -> None: ...
-
-    def send_lowest_test(
         self,
-        deal: FlightDeal | None,
+        deal: FlightDeal,
         airport_names: dict[str, str],
+        ground_transfer_notes: dict[str, str],
+        baseline: Decimal,
         now: datetime,
     ) -> None: ...
 
 
-def origins_for_time(
-    now: datetime,
-    every_run_origins: tuple[str, ...],
-    rotating_origins: tuple[str, ...],
-) -> tuple[str, ...]:
-    """Scan core airports every run and rotate one lower-priority airport."""
+def queries_for_time(
+    now: datetime, tasks: tuple[SearchTask, ...], per_run: int
+) -> tuple[SearchTask, ...]:
+    if per_run <= 0 or per_run >= len(tasks):
+        return tasks
     slot = int(now.timestamp()) // (15 * 60)
-    origins = list(every_run_origins)
-    if rotating_origins:
-        origins.append(rotating_origins[slot % len(rotating_origins)])
-    return tuple(dict.fromkeys(origins))
+    start = (slot * per_run) % len(tasks)
+    return tuple(tasks[(start + offset) % len(tasks)] for offset in range(per_run))
 
 
-def merge_candidates(groups: list[list[Candidate]]) -> list[tuple[Candidate, tuple[str, ...]]]:
+def merge_candidates(
+    groups: list[list[Candidate]],
+) -> list[tuple[Candidate, tuple[str, ...]]]:
     merged: dict[tuple[str, str, date], tuple[Candidate, set[str]]] = {}
     for group in groups:
         for candidate in group:
             existing = merged.get(candidate.key)
             if existing is None:
                 merged[candidate.key] = (candidate, {candidate.source})
-            else:
-                best, sources = existing
-                sources.add(candidate.source)
-                if candidate.estimated_price_per_adult < best.estimated_price_per_adult:
-                    merged[candidate.key] = (candidate, sources)
-    ordered = sorted(
-        merged.values(), key=lambda item: item[0].estimated_price_per_adult
-    )
+                continue
+            best, sources = existing
+            sources.add(candidate.source)
+            if candidate.estimated_price_per_adult < best.estimated_price_per_adult:
+                merged[candidate.key] = (candidate, sources)
+    ordered = sorted(merged.values(), key=lambda item: item[0].estimated_price_per_adult)
     return [(candidate, tuple(sorted(sources))) for candidate, sources in ordered]
 
 
@@ -98,130 +92,86 @@ class DealMonitor:
         self,
         now: datetime,
         dry_run: bool = False,
-        notify_lowest_test: bool = False,
+        initialize_baseline: bool = False,
+        scan_all: bool = False,
     ) -> list[FlightDeal]:
-        origins = origins_for_time(
-            now,
-            self.settings.every_run_origins,
-            self.settings.rotating_origins,
+        all_tasks = self.settings.search_tasks()
+        tasks = all_tasks if scan_all else queries_for_time(
+            now, all_tasks, self.settings.queries_per_run
         )
-        start = now.date() + timedelta(days=self.settings.departure_start_offset_days)
-        end = now.date() + timedelta(days=self.settings.days_ahead)
-        logger.info("本轮扫描 %s，日期 %s 至 %s", "、".join(origins), start, end)
-
+        logger.info("本轮扫描 %d/%d 个出发机场+日期任务", len(tasks), len(all_tasks))
         groups: list[list[Candidate]] = []
-        discovery_price_limit = (
-            Decimal("999999999")
-            if notify_lowest_test
-            else self.settings.max_price_per_adult
-        )
-        for origin in origins:
+        for task in tasks:
             for provider in self.discovery_providers:
                 try:
                     found = provider.discover(
-                        origin,
-                        start,
-                        end,
-                        discovery_price_limit,
+                        task.origin,
+                        task.departure_date,
+                        task.destinations,
+                        self.settings.max_observed_price_per_adult,
                         self.settings.currency,
                     )
                     logger.info(
-                        "%s / %s 发现 %d 个候选",
-                        origin,
+                        "%s %s %s / %s：%d 个目标候选",
+                        task.direction,
+                        task.origin,
+                        task.departure_date,
                         type(provider).__name__,
                         len(found),
                     )
                     groups.append(found)
                 except Exception:
                     logger.exception(
-                        "%s / %s 发现阶段失败，本轮继续",
-                        origin,
+                        "%s %s %s / %s 查询失败，本轮继续",
+                        task.direction,
+                        task.origin,
+                        task.departure_date,
                         type(provider).__name__,
                     )
 
-        merged_candidates = merge_candidates(groups)
-        if notify_lowest_test:
-            test_deal: FlightDeal | None = None
-            if merged_candidates:
-                candidate, sources = merged_candidates[0]
-                test_deal = self.verifier.verify(
-                    candidate,
-                    self.settings.adults,
-                    Decimal("999999999"),
-                    Decimal("999999999"),
-                    self.settings.currency,
-                    sources,
-                )
-            if not dry_run:
-                self.notifier.send_lowest_test(
-                    test_deal, self.settings.airport_names, now
-                )
-            logger.info("最低价测试完成：%s", test_deal.fingerprint if test_deal else "无结果")
-            return [test_deal] if test_deal else []
-
-        candidates = []
-        for candidate, sources in merged_candidates:
-            if self.state.should_verify_candidate(
-                candidate.origin,
-                candidate.destination,
-                candidate.departure_date.isoformat(),
-                now,
-                timedelta(minutes=self.settings.candidate_recheck_minutes),
-            ):
-                candidates.append((candidate, sources))
-            if len(candidates) >= self.settings.max_candidates_to_verify_per_run:
-                break
         deals: list[FlightDeal] = []
-        for candidate, sources in candidates:
-            try:
-                deal = self.verifier.verify(
-                    candidate,
-                    self.settings.adults,
-                    self.settings.max_total_price,
-                    self.settings.max_price_per_adult,
-                    self.settings.currency,
-                    sources,
-                )
-            except Exception:
-                logger.exception(
-                    "实时复核失败：%s-%s %s",
-                    candidate.origin,
-                    candidate.destination,
-                    candidate.departure_date,
-                )
-                continue
+        for candidate, sources in merge_candidates(groups):
+            deal = self.verifier.verify(
+                candidate,
+                self.settings.adults,
+                self.settings.max_observed_price_per_adult,
+                self.settings.currency,
+                sources,
+            )
             if deal is None:
-                if not dry_run:
-                    self.state.mark_candidate_checked(
-                        candidate.origin,
-                        candidate.destination,
-                        candidate.departure_date.isoformat(),
-                        now,
-                    )
                 continue
-            if not dry_run:
-                self.state.mark_candidate_checked(
-                    candidate.origin,
-                    candidate.destination,
-                    candidate.departure_date.isoformat(),
-                    now,
+            baseline, previous_low = self.state.prices(deal)
+            logger.info(
+                "观察价 %s-%s %s：¥%s/人；基准 ¥%s；此前最低 %s",
+                deal.origin,
+                deal.destination,
+                deal.departure_at.date(),
+                deal.price_per_adult,
+                baseline,
+                f"¥{previous_low}" if previous_low is not None else "尚未建立",
+            )
+            should_notify = (
+                not initialize_baseline
+                and self.state.should_notify(
+                    deal, self.settings.notification_drop_per_adult
                 )
-            should_notify = self.state.should_notify(
-                deal,
-                now,
-                self.settings.notification_price_drop_cny,
-                timedelta(hours=self.settings.renotify_after_missing_hours),
             )
             if should_notify:
                 if dry_run:
                     logger.info("DRY RUN：将推送 %s", deal.fingerprint)
                 else:
-                    self.notifier.send_deal(deal, self.settings.airport_names, now)
+                    self.notifier.send_deal(
+                        deal,
+                        self.settings.airport_names,
+                        self.settings.ground_transfer_notes,
+                        baseline,
+                        now,
+                    )
                 deals.append(deal)
-            self.state.mark_seen(deal, now, notified=should_notify and not dry_run)
+            if not dry_run:
+                self.state.mark_seen(deal, now, notified=should_notify)
 
-        self.state.prune(now)
         if not dry_run:
             self.state.save()
-        logger.info("本轮完成：复核 %d 个候选，新推送 %d 个", len(candidates), len(deals))
+        logger.info("本轮完成：观察到 %d 条路线最低价，新推送 %d 条", len(merge_candidates(groups)), len(deals))
         return deals

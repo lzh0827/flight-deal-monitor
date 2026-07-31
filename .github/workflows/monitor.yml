@@ -13,8 +13,8 @@ on:
         required: false
         default: false
         type: boolean
-      notify_lowest_test:
-        description: "推送本轮发现的最低缓存价格（一次性测试）"
+      initialize_baseline:
+        description: "扫描全部目标并建立初始基线，不发送降价提醒"
         required: false
         default: false
         type: boolean
@@ -72,7 +72,7 @@ jobs:
         run: >-
           python -m flight_monitor.app
           ${{ (github.event_name == 'workflow_dispatch' && inputs.dry_run) && '--dry-run' || '' }}
-          ${{ (github.event_name == 'workflow_dispatch' && inputs.notify_lowest_test) && '--notify-lowest-test' || '' }}
+          ${{ (github.event_name == 'workflow_dispatch' && inputs.initialize_baseline) && '--initialize-baseline --scan-all' || '' }}
 
       - name: 保存去重状态
         if: ${{ always() && hashFiles('state/monitor-state.json') != '' }}

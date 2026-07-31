@@ -26,19 +26,16 @@ def _required_env(name: str) -> str:
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     project_root = Path(__file__).resolve().parents[2]
-    parser = argparse.ArgumentParser(description="低价机票监控器")
+    parser = argparse.ArgumentParser(description="潮汕行程定向机票监控器")
+    parser.add_argument("--config", type=Path, default=project_root / "config.json")
+    parser.add_argument("--dry-run", action="store_true", help="搜索但不推送、不保存")
+    parser.add_argument("--test-notification", action="store_true")
     parser.add_argument(
-        "--config", type=Path, default=project_root / "config.json", help="配置文件"
-    )
-    parser.add_argument("--dry-run", action="store_true", help="搜索但不推送、不保存状态")
-    parser.add_argument(
-        "--test-notification", action="store_true", help="只测试 PushPlus 微信通知"
-    )
-    parser.add_argument(
-        "--notify-lowest-test",
+        "--initialize-baseline",
         action="store_true",
-        help="扫描一次并推送本轮发现的最低缓存价格",
+        help="扫描并保存当前观察价作为基线，不发送低价提醒",
     )
+    parser.add_argument("--scan-all", action="store_true", help="本轮扫描全部任务")
     return parser.parse_args(argv)
 
 
@@ -55,22 +52,17 @@ def main(argv: list[str] | None = None) -> int:
             _required_env("PUSHPLUS_TOKEN"), settings.request_timeout_seconds, session
         )
         if args.test_notification:
-            notifier.send_test()
+            notifier.send_test(settings)
             print("PushPlus 测试消息已提交，请检查微信。")
             return 0
-
-        travelpayouts_token = _required_env("TRAVELPAYOUTS_TOKEN")
+        token = _required_env("TRAVELPAYOUTS_TOKEN")
         providers = [
             TravelpayoutsDiscovery(
-                travelpayouts_token,
-                settings.request_timeout_seconds,
-                session,
-                market,
+                token, settings.request_timeout_seconds, session, market
             )
             for market in settings.travelpayouts_markets
         ]
-
-        state = MonitorState(settings.state_file)
+        state = MonitorState(settings.state_file, settings.known_baselines)
         state.load()
         monitor = DealMonitor(
             settings, providers, CachedFareVerifier(), notifier, state
@@ -78,7 +70,8 @@ def main(argv: list[str] | None = None) -> int:
         monitor.run(
             datetime.now(ZoneInfo("Asia/Shanghai")),
             dry_run=args.dry_run,
-            notify_lowest_test=args.notify_lowest_test,
+            initialize_baseline=args.initialize_baseline,
+            scan_all=args.scan_all,
         )
         return 0
     except Exception as exc:

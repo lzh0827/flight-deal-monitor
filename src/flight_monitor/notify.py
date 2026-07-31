@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 from datetime import datetime
+from decimal import Decimal
+from urllib.parse import quote
 
 import requests
 
+from .config import Settings
 from .models import FlightDeal
 
 
@@ -16,94 +19,92 @@ class PushPlusNotifier:
         self.session = session
 
     def send_deal(
-        self, deal: FlightDeal, airport_names: dict[str, str], now: datetime
+        self,
+        deal: FlightDeal,
+        airport_names: dict[str, str],
+        ground_transfer_notes: dict[str, str],
+        baseline: Decimal,
+        now: datetime,
     ) -> None:
         origin_name = airport_names.get(deal.origin, deal.origin)
         destination_name = airport_names.get(deal.destination, deal.destination)
         flights = " → ".join(deal.flight_numbers)
-        stop_text = (
-            "中转次数待确认"
-            if deal.stops < 0
-            else ("直飞" if deal.stops == 0 else f"中转 {deal.stops} 次")
+        stop_text = "中转待确认" if deal.stops < 0 else (
+            "直飞" if deal.stops == 0 else f"中转 {deal.stops} 次"
+        )
+        drop = baseline - deal.price_per_adult
+        links = self._comparison_links(deal)
+        transfer_airport = (
+            deal.destination if deal.destination in ground_transfer_notes else deal.origin
         )
         content = "\n".join(
             [
-                f"## ✈️ 发现 ≤ ¥300/人的缓存机票价格",
+                "## ✈️ 潮汕行程出现新的路线历史低价",
                 "",
-                f"- **航线**：{origin_name}（{deal.origin}）→ "
-                f"{destination_name}（{deal.destination}）",
-                f"- **起飞**：{deal.departure_at.strftime('%Y-%m-%d %H:%M')}",
+                f"- **航线**：{origin_name}（{deal.origin}）→ {destination_name}（{deal.destination}）",
+                f"- **日期/时间**：{deal.departure_at.strftime('%Y-%m-%d %H:%M')}",
                 f"- **航班**：{flights}（{stop_text}）",
-                f"- **两人估算总价**：¥{deal.total_price:.2f}",
-                f"- **每人缓存价**：¥{deal.price_per_adult:.2f}",
-                f"- **托运行李**：{deal.baggage}",
-                f"- **发现来源**：{'、'.join(deal.discovery_sources)}（非实时库存）",
-                f"- **发现时间**：{now.strftime('%Y-%m-%d %H:%M:%S')}（Asia/Shanghai）",
+                f"- **缓存观察价**：¥{deal.price_per_adult:.2f}/人，三人 ¥{deal.total_price:.2f}",
+                f"- **本路线基准**：¥{baseline:.2f}/人，已下降 ¥{drop:.2f}/人",
+                "- **托运行李要求**：三人均需各20kg；当前缓存价未确认包含行李",
+                f"- **接驳提示**：{ground_transfer_notes.get(transfer_airport, '请核算机场、高铁站和最终目的地之间的接驳')}",
+                f"- **数据来源**：{'、'.join(deal.discovery_sources)}（近期搜索缓存，不是实时库存）",
+                f"- **发现时间**：{now.strftime('%Y-%m-%d %H:%M:%S')}（北京时间）",
                 "",
-                f"[打开 Aviasales 复核]({deal.booking_url}) | "
-                f"[用 Google Flights 比价]({deal.comparison_url})",
+                " | ".join(f"[{name}]({url})" for name, url in links),
                 "",
-                "> ⚠️ 这是最近用户搜索形成的缓存发现价，不代表当前仍有两张票，"
-                "也不能保证最终含税结算价。请在付款前核对两名成人的总价、座位、"
-                "行李额和票价适用条件。",
+                "> 下单前请在至少两个平台核对：三名成人同一航班、含税燃油、每人20kg托运、学生/青年优惠券、退改规则。只有最终支付页价格能与现有¥270/人的宁波—揭阳方案直接比较。",
             ]
         )
         self._send(
-            f"低价机票：{deal.origin}→{deal.destination} ¥{deal.price_per_adult:.0f}/人",
+            f"潮汕机票降价：{deal.origin}→{deal.destination} ¥{deal.price_per_adult:.0f}/人",
             content,
         )
 
-    def send_test(self) -> None:
+    def send_test(self, settings: Settings) -> None:
         self._send(
-            "机票监控测试成功",
-            "## ✅ 微信通知已连通\n\n以后发现每人缓存价不超过 ¥300 的机票时，会发到这里；下单前需要再次核对实时总价。",
+            "潮汕机票监控已配置",
+            "\n".join(
+                [
+                    "## ✅ 微信通知链路正常",
+                    "",
+                    f"- 旅客：{settings.adults}名成人/学生",
+                    f"- 行李：每人{settings.required_baggage_kg}kg托运",
+                    f"- 去程：{'、'.join(item.isoformat() for item in settings.outbound_dates)}",
+                    f"- 返程：{'、'.join(item.isoformat() for item in settings.return_dates)}",
+                    f"- 提醒门槛：路线刷新历史最低且较基准下降至少¥{settings.notification_drop_per_adult}/人",
+                    "",
+                    "> 缓存候选价不含行李保证；收到降价后仍需打开多个平台核对最终支付价。",
+                ]
+            ),
         )
 
-    def send_lowest_test(
-        self,
-        deal: FlightDeal | None,
-        airport_names: dict[str, str],
-        now: datetime,
-    ) -> None:
-        if deal is None:
-            self._send(
-                "最低价航班测试：本轮无结果",
-                "## 本轮没有找到可用的缓存航班记录\n\n"
-                f"检测时间：{now.strftime('%Y-%m-%d %H:%M:%S')}（北京时间）",
-            )
-            return
-
-        origin_name = airport_names.get(deal.origin, deal.origin)
-        destination_name = airport_names.get(deal.destination, deal.destination)
-        flights = "、".join(deal.flight_numbers)
-        stop_text = (
-            "中转次数待确认"
-            if deal.stops < 0
-            else ("直飞" if deal.stops == 0 else f"中转 {deal.stops} 次")
+    def _comparison_links(self, deal: FlightDeal) -> list[tuple[str, str]]:
+        origin = deal.origin
+        destination = deal.destination
+        departure_date = deal.departure_at.date().isoformat()
+        query = quote(
+            f"{origin} {destination} {departure_date} 3 adults 20kg baggage"
         )
-        content = "\n".join(
-            [
-                "## ✈️ 本轮最低缓存价格（一次性测试）",
-                "",
-                f"- **航线**：{origin_name}（{deal.origin}）→ "
-                f"{destination_name}（{deal.destination}）",
-                f"- **出发**：{deal.departure_at.strftime('%Y-%m-%d %H:%M')}",
-                f"- **航班**：{flights}（{stop_text}）",
-                f"- **每人缓存价**：¥{deal.price_per_adult:.2f}",
-                f"- **两人估算总价**：¥{deal.total_price:.2f}",
-                f"- **来源**：{'、'.join(deal.discovery_sources)}",
-                f"- **检测时间**：{now.strftime('%Y-%m-%d %H:%M:%S')}（北京时间）",
-                "",
-                f"[打开 Aviasales 复核]({deal.booking_url}) | "
-                f"[使用 Google Flights 比价]({deal.comparison_url})",
-                "",
-                "> 这是缓存搜索价格测试，不保证仍有两张票，也不保证最终含税价、行李额和座位；付款前必须重新核对。",
-            ]
-        )
-        self._send(
-            f"最低价测试：{deal.origin}→{deal.destination} ¥{deal.price_per_adult:.0f}/人",
-            content,
-        )
+        return [
+            ("Aviasales候选", deal.booking_url),
+            (
+                "携程",
+                f"https://flights.ctrip.com/online/list/oneway-{origin.lower()}-{destination.lower()}?depdate={departure_date}",
+            ),
+            (
+                "去哪儿",
+                "https://flight.qunar.com/site/oneway_list.htm?"
+                f"fromCode={origin}&toCode={destination}&fromDate={departure_date}",
+            ),
+            (
+                "飞猪",
+                "https://sjipiao.fliggy.com/flight_search_result.htm?"
+                f"tripType=0&depCity={origin}&arrCity={destination}&depDate={departure_date}",
+            ),
+            ("Google Flights", f"https://www.google.com/travel/flights?q={query}"),
+            ("春秋官网", f"https://flights.ch.com/flight-date/{origin}-{destination}/"),
+        ]
 
     def _send(self, title: str, content: str) -> None:
         response = self.session.post(

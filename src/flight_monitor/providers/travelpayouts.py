@@ -9,7 +9,7 @@ from ..models import Candidate
 
 
 class TravelpayoutsDiscovery:
-    """Discover cached low fares; every result must be live-verified elsewhere."""
+    """Read recent Aviasales search-cache observations for one origin/date."""
 
     endpoint = "https://api.travelpayouts.com/aviasales/v3/prices_for_dates"
 
@@ -28,8 +28,8 @@ class TravelpayoutsDiscovery:
     def discover(
         self,
         origin: str,
-        start: date,
-        end: date,
+        departure_date: date,
+        destinations: tuple[str, ...],
         max_price: Decimal,
         currency: str,
     ) -> list[Candidate]:
@@ -38,6 +38,7 @@ class TravelpayoutsDiscovery:
             headers={"X-Access-Token": self.token},
             params={
                 "origin": origin,
+                "departure_at": departure_date.isoformat(),
                 "currency": currency.lower(),
                 "one_way": "true",
                 "direct": "false",
@@ -53,19 +54,19 @@ class TravelpayoutsDiscovery:
         payload = response.json()
         if payload.get("success") is not True:
             raise RuntimeError(f"Travelpayouts 返回错误: {payload.get('error')}")
+        allowed = set(destinations)
         candidates: list[Candidate] = []
         for item in payload.get("data", []):
             try:
                 departure_at = datetime.fromisoformat(item["departure_at"])
-                departure = departure_at.date()
                 price = Decimal(str(item["price"]))
                 destination = str(item["destination"]).upper()
             except (KeyError, TypeError, ValueError, InvalidOperation):
                 continue
             if (
-                start <= departure <= end
+                departure_at.date() == departure_date
+                and destination in allowed
                 and price <= max_price
-                and destination != origin
             ):
                 link = str(item.get("link", ""))
                 if link.startswith("/"):
@@ -75,14 +76,18 @@ class TravelpayoutsDiscovery:
                 flight_number = f"{airline}{number}" if airline or number else "待确认"
                 candidates.append(
                     Candidate(
-                        origin,
-                        destination,
-                        departure,
-                        price,
-                        f"Aviasales缓存价({self.market.upper()})",
+                        origin=origin,
+                        destination=destination,
+                        departure_date=departure_date,
+                        estimated_price_per_adult=price,
+                        source=f"Aviasales缓存价({self.market.upper()})",
                         departure_at=departure_at,
                         flight_number=flight_number,
-                        stops=int(item["transfers"]) if item.get("transfers") is not None else None,
+                        stops=(
+                            int(item["transfers"])
+                            if item.get("transfers") is not None
+                            else None
+                        ),
                         booking_url=link,
                     )
                 )

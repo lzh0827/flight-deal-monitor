@@ -3,31 +3,32 @@ from __future__ import annotations
 import json
 import tempfile
 import unittest
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
-from zoneinfo import ZoneInfo
 
+from flight_monitor.config import SearchTask, load_settings
 from flight_monitor.models import Candidate, FlightDeal
-from flight_monitor.monitor import merge_candidates, origins_for_time
+from flight_monitor.monitor import merge_candidates, queries_for_time
 from flight_monitor.providers.cached import CachedFareVerifier
-from flight_monitor.state import MonitorState
+from flight_monitor.state import MonitorState, route_key
 
 
-def sample_deal(total: str = "580") -> FlightDeal:
+def sample_deal(price: str = "270", origin: str = "NGB", destination: str = "SWA") -> FlightDeal:
+    per_adult = Decimal(price)
     return FlightDeal(
-        origin="HGH",
-        destination="CAN",
-        departure_at=datetime(2026, 8, 1, 8, 0),
-        arrival_at=datetime(2026, 8, 1, 10, 0),
-        flight_numbers=("CZ1234",),
-        total_price=Decimal(total),
-        price_per_adult=Decimal(total) / 2,
+        origin=origin,
+        destination=destination,
+        departure_at=datetime(2026, 8, 30, 9, 50),
+        arrival_at=None,
+        flight_numbers=("9C7611",),
+        total_price=per_adult * 3,
+        price_per_adult=per_adult,
         currency="CNY",
-        adults=2,
-        baggage="20kg",
+        adults=3,
+        baggage="待确认20kg",
         stops=0,
-        validating_airlines=("CZ",),
+        validating_airlines=("9C",),
         discovery_sources=("test",),
         booking_url="https://example.com",
         comparison_url="https://example.com",
@@ -35,76 +36,71 @@ def sample_deal(total: str = "580") -> FlightDeal:
 
 
 class MonitorTests(unittest.TestCase):
-    def test_cached_fare_requires_each_adult_under_300(self) -> None:
-        verifier = CachedFareVerifier()
-        candidate = Candidate(
-            "HGH", "CAN", date(2026, 8, 1), Decimal("299.99"), "cache"
+    def test_real_config_has_expected_scope(self) -> None:
+        settings = load_settings(Path(__file__).parents[1] / "config.json")
+        self.assertEqual(settings.adults, 3)
+        self.assertEqual(settings.required_baggage_kg, 20)
+        self.assertEqual(len(settings.search_tasks()), 45)
+        self.assertIn("SWA", settings.arrival_airports)
+        self.assertIn("FUO", settings.arrival_airports)
+
+    def test_query_rotation_covers_contiguous_batch(self) -> None:
+        tasks = tuple(
+            SearchTask("去程", f"A{i}", date(2026, 8, 30), ("SWA",))
+            for i in range(45)
         )
-        deal = verifier.verify(
-            candidate, 2, Decimal("600"), Decimal("300"), "CNY", ("cache",)
+        now = datetime(
+            2026, 7, 31, 12, 0, tzinfo=timezone(timedelta(hours=8))
+        )
+        selected = queries_for_time(now, tasks, 9)
+        self.assertEqual(len(selected), 9)
+        self.assertEqual(len(set(selected)), 9)
+
+    def test_cached_fare_uses_three_adults(self) -> None:
+        candidate = Candidate(
+            "NGB", "SWA", date(2026, 8, 30), Decimal("219"), "cache"
+        )
+        deal = CachedFareVerifier().verify(
+            candidate, 3, Decimal("2000"), "CNY", ("cache",)
         )
         self.assertIsNotNone(deal)
-        self.assertEqual(deal.total_price, Decimal("599.98"))
+        self.assertEqual(deal.total_price, Decimal("657"))
 
-        too_expensive = Candidate(
-            "HGH", "CAN", date(2026, 8, 1), Decimal("300.01"), "cache"
-        )
-        self.assertIsNone(
-            verifier.verify(
-                too_expensive,
-                2,
-                Decimal("600"),
-                Decimal("300"),
-                "CNY",
-                ("cache",),
-            )
-        )
-
-    def test_merge_candidates_keeps_lowest_and_all_sources(self) -> None:
-        first = Candidate("HGH", "CAN", date(2026, 8, 1), Decimal("290"), "A")
-        second = Candidate("HGH", "CAN", date(2026, 8, 1), Decimal("280"), "B")
+    def test_merge_candidates_keeps_lowest_and_sources(self) -> None:
+        first = Candidate("NGB", "SWA", date(2026, 8, 30), Decimal("260"), "A")
+        second = Candidate("NGB", "SWA", date(2026, 8, 30), Decimal("250"), "B")
         merged = merge_candidates([[first], [second]])
-        self.assertEqual(merged[0][0].estimated_price_per_adult, Decimal("280"))
+        self.assertEqual(merged[0][0].estimated_price_per_adult, Decimal("250"))
         self.assertEqual(merged[0][1], ("A", "B"))
 
-    def test_core_origins_run_every_time_and_other_rotates(self) -> None:
-        now = datetime(2026, 7, 17, 12, 0, tzinfo=ZoneInfo("Asia/Shanghai"))
-        origins = origins_for_time(
-            now, ("HGH", "SHA", "PVG"), ("NGB", "YIW", "NKG")
-        )
-        self.assertEqual(origins[:3], ("HGH", "SHA", "PVG"))
-        self.assertIn(origins[3], {"NGB", "YIW", "NKG"})
+    def test_unknown_route_first_observation_only_establishes_baseline(self) -> None:
+        state = MonitorState(Path("unused"), {})
+        now = datetime(2026, 7, 31, 12, 0)
+        deal = sample_deal("400", origin="HGH")
+        self.assertFalse(state.should_notify(deal, Decimal("50")))
+        state.mark_seen(deal, now, notified=False)
+        self.assertFalse(state.should_notify(sample_deal("360", origin="HGH"), Decimal("50")))
+        self.assertTrue(state.should_notify(sample_deal("349", origin="HGH"), Decimal("50")))
 
-    def test_state_deduplicates_and_notifies_price_drop(self) -> None:
+    def test_known_270_baseline_alerts_at_220_or_lower(self) -> None:
+        key = "NGB-SWA-2026-08-30"
+        state = MonitorState(Path("unused"), {key: Decimal("270")})
+        self.assertFalse(state.should_notify(sample_deal("221"), Decimal("50")))
+        self.assertTrue(state.should_notify(sample_deal("220"), Decimal("50")))
+        state.mark_seen(sample_deal("220"), datetime(2026, 7, 31, 12, 0), True)
+        self.assertFalse(state.should_notify(sample_deal("220"), Decimal("50")))
+        self.assertTrue(state.should_notify(sample_deal("219"), Decimal("50")))
+
+    def test_state_saves_version_two(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
-            state_path = Path(directory) / "state.json"
-            state = MonitorState(state_path)
-            now = datetime(2026, 7, 17, 12, 0, tzinfo=ZoneInfo("Asia/Shanghai"))
-            deal = sample_deal("580")
-            self.assertTrue(
-                state.should_notify(deal, now, Decimal("1"), timedelta(hours=24))
-            )
-            state.mark_seen(deal, now, notified=True)
-            self.assertFalse(
-                state.should_notify(
-                    deal,
-                    now + timedelta(minutes=30),
-                    Decimal("1"),
-                    timedelta(hours=24),
-                )
-            )
-            cheaper = sample_deal("578")
-            self.assertTrue(
-                state.should_notify(
-                    cheaper,
-                    now + timedelta(hours=1),
-                    Decimal("1"),
-                    timedelta(hours=24),
-                )
-            )
+            path = Path(directory) / "state.json"
+            state = MonitorState(path, {})
+            deal = sample_deal("300", origin="HGH")
+            state.mark_seen(deal, datetime(2026, 7, 31, 12, 0), False)
             state.save()
-            loaded = json.loads(state_path.read_text(encoding="utf-8"))
-            self.assertIn(deal.fingerprint, loaded["notified"])
+            loaded = json.loads(path.read_text(encoding="utf-8"))
+            self.assertEqual(loaded["version"], 2)
+            self.assertIn(route_key(deal), loaded["routes"])
 
 
 if __name__ == "__main__":
