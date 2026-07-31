@@ -47,8 +47,13 @@ class SerpApiGoogleFlights:
             },
             timeout=self.timeout,
         )
-        response.raise_for_status()
-        payload = response.json()
+        try:
+            payload = response.json()
+        except ValueError:
+            payload = {}
+        if not response.ok:
+            message = payload.get("error") or f"HTTP {response.status_code}"
+            raise RuntimeError(f"SerpApi Google Flights 查询失败: {message}")
         if payload.get("error"):
             raise RuntimeError(f"SerpApi Google Flights 查询失败: {payload['error']}")
         comparison_url = str(

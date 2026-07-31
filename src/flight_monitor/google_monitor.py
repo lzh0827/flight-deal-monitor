@@ -92,6 +92,8 @@ def run_google_flights_monitor(
             )
 
     deals = _cheapest_per_route(all_deals)
+    if completed == 0:
+        raise RuntimeError("Google Flights四个日期组合全部查询失败")
     alerts: list[tuple[RoundTripDeal, Decimal]] = []
     for deal in deals:
         baseline = state.google_baseline(deal)

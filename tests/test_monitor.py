@@ -41,6 +41,8 @@ def sample_deal(price: str = "270", origin: str = "NGB", destination: str = "SWA
 class MonitorTests(unittest.TestCase):
     def test_serpapi_uses_one_multi_airport_query_and_parses_result(self) -> None:
         class FakeResponse:
+            ok = True
+
             def raise_for_status(self) -> None:
                 return None
 
