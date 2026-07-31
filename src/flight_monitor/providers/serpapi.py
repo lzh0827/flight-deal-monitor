@@ -38,7 +38,7 @@ class SerpApiGoogleFlights:
                 "return_date": return_date.isoformat(),
                 "adults": adults,
                 "currency": currency,
-                "hl": "zh",
+                "hl": "zh-cn",
                 "gl": "cn",
                 "type": 1,
                 "travel_class": 1,

@@ -87,6 +87,7 @@ class MonitorTests(unittest.TestCase):
         self.assertEqual(session.params["departure_id"], "NGB,HGH")
         self.assertEqual(session.params["arrival_id"], "SWA,CAN")
         self.assertEqual(session.params["adults"], 3)
+        self.assertEqual(session.params["hl"], "zh-cn")
         self.assertEqual(deals[0].displayed_price_per_adult, Decimal("688"))
 
     def test_google_schedule_and_four_trip_combinations(self) -> None:
