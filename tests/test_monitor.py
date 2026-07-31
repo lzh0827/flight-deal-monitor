@@ -11,6 +11,7 @@ from flight_monitor.config import SearchTask, load_settings
 from flight_monitor.models import Candidate, FlightDeal
 from flight_monitor.monitor import merge_candidates, queries_for_time
 from flight_monitor.providers.cached import CachedFareVerifier
+from flight_monitor.providers.travelpayouts import TravelpayoutsDiscovery
 from flight_monitor.state import MonitorState, route_key
 
 
@@ -36,6 +37,52 @@ def sample_deal(price: str = "270", origin: str = "NGB", destination: str = "SWA
 
 
 class MonitorTests(unittest.TestCase):
+    def test_travelpayouts_queries_each_destination_explicitly(self) -> None:
+        class FakeResponse:
+            def __init__(self, destination: str) -> None:
+                self.destination = destination
+
+            def raise_for_status(self) -> None:
+                return None
+
+            def json(self) -> dict:
+                return {
+                    "success": True,
+                    "data": [
+                        {
+                            "departure_at": "2026-08-30T09:50:00+08:00",
+                            "destination": self.destination,
+                            "price": 250,
+                            "airline": "9C",
+                            "flight_number": "7611",
+                            "transfers": 0,
+                        }
+                    ],
+                }
+
+        class FakeSession:
+            def __init__(self) -> None:
+                self.destinations: list[str] = []
+
+            def get(self, url: str, **kwargs: object) -> FakeResponse:
+                params = kwargs["params"]
+                assert isinstance(params, dict)
+                destination = str(params["destination"])
+                self.destinations.append(destination)
+                return FakeResponse(destination)
+
+        session = FakeSession()
+        provider = TravelpayoutsDiscovery("token", 10, session)  # type: ignore[arg-type]
+        results = provider.discover(
+            "NGB",
+            date(2026, 8, 30),
+            ("SWA", "XMN"),
+            Decimal("2000"),
+            "CNY",
+        )
+        self.assertEqual(session.destinations, ["SWA", "XMN"])
+        self.assertEqual({item.destination for item in results}, {"SWA", "XMN"})
+
     def test_real_config_has_expected_scope(self) -> None:
         settings = load_settings(Path(__file__).parents[1] / "config.json")
         self.assertEqual(settings.adults, 3)

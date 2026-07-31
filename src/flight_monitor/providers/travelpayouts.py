@@ -33,11 +33,41 @@ class TravelpayoutsDiscovery:
         max_price: Decimal,
         currency: str,
     ) -> list[Candidate]:
+        candidates: list[Candidate] = []
+        failures: list[Exception] = []
+        for destination in destinations:
+            try:
+                candidates.extend(
+                    self._discover_route(
+                        origin,
+                        destination,
+                        departure_date,
+                        max_price,
+                        currency,
+                    )
+                )
+            except Exception as exc:
+                failures.append(exc)
+        if failures and len(failures) == len(destinations):
+            raise RuntimeError(
+                f"{origin} {departure_date} 的全部精确路线查询失败"
+            ) from failures[0]
+        return candidates
+
+    def _discover_route(
+        self,
+        origin: str,
+        destination: str,
+        departure_date: date,
+        max_price: Decimal,
+        currency: str,
+    ) -> list[Candidate]:
         response = self.session.get(
             self.endpoint,
             headers={"X-Access-Token": self.token},
             params={
                 "origin": origin,
+                "destination": destination,
                 "departure_at": departure_date.isoformat(),
                 "currency": currency.lower(),
                 "one_way": "true",
@@ -45,7 +75,7 @@ class TravelpayoutsDiscovery:
                 "unique": "false",
                 "market": self.market,
                 "page": 1,
-                "limit": 1000,
+                "limit": 100,
                 "sorting": "price",
             },
             timeout=self.timeout,
@@ -54,18 +84,17 @@ class TravelpayoutsDiscovery:
         payload = response.json()
         if payload.get("success") is not True:
             raise RuntimeError(f"Travelpayouts 返回错误: {payload.get('error')}")
-        allowed = set(destinations)
         candidates: list[Candidate] = []
         for item in payload.get("data", []):
             try:
                 departure_at = datetime.fromisoformat(item["departure_at"])
                 price = Decimal(str(item["price"]))
-                destination = str(item["destination"]).upper()
+                item_destination = str(item["destination"]).upper()
             except (KeyError, TypeError, ValueError, InvalidOperation):
                 continue
             if (
                 departure_at.date() == departure_date
-                and destination in allowed
+                and item_destination == destination
                 and price <= max_price
             ):
                 link = str(item.get("link", ""))
@@ -77,10 +106,10 @@ class TravelpayoutsDiscovery:
                 candidates.append(
                     Candidate(
                         origin=origin,
-                        destination=destination,
+                        destination=item_destination,
                         departure_date=departure_date,
                         estimated_price_per_adult=price,
-                        source=f"Aviasales缓存价({self.market.upper()})",
+                        source=f"Aviasales精确路线缓存价({self.market.upper()})",
                         departure_at=departure_at,
                         flight_number=flight_number,
                         stops=(

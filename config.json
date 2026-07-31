@@ -7,7 +7,7 @@
   "default_comparison_baseline_per_adult": 270,
   "request_timeout_seconds": 25,
   "queries_per_run": 23,
-  "travelpayouts_markets": ["cn", "us", "sg"],
+  "travelpayouts_markets": ["cn"],
   "state_file": "state/chaoshan-trip-monitor-state.json",
   "departure_airports": ["NGB", "HGH", "SHA", "PVG", "YIW", "WUX", "NKG", "WNZ", "HYN"],
   "arrival_airports": ["SWA", "MXZ", "XMN", "JJN", "CAN", "SZX", "HUZ", "ZUH", "FUO"],
