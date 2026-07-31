@@ -44,6 +44,14 @@ class Notifier(Protocol):
         now: datetime,
     ) -> None: ...
 
+    def send_top_deals(
+        self,
+        deals: list[FlightDeal],
+        airport_names: dict[str, str],
+        now: datetime,
+        requested_count: int,
+    ) -> None: ...
+
 
 def queries_for_time(
     now: datetime, tasks: tuple[SearchTask, ...], per_run: int
@@ -94,6 +102,7 @@ class DealMonitor:
         dry_run: bool = False,
         initialize_baseline: bool = False,
         scan_all: bool = False,
+        notify_top: int = 0,
     ) -> list[FlightDeal]:
         all_tasks = self.settings.search_tasks()
         tasks = all_tasks if scan_all else queries_for_time(
@@ -130,6 +139,7 @@ class DealMonitor:
                     )
 
         deals: list[FlightDeal] = []
+        observed_deals: list[FlightDeal] = []
         for candidate, sources in merge_candidates(groups):
             deal = self.verifier.verify(
                 candidate,
@@ -140,6 +150,7 @@ class DealMonitor:
             )
             if deal is None:
                 continue
+            observed_deals.append(deal)
             baseline, previous_low = self.state.prices(deal)
             logger.info(
                 "观察价 %s-%s %s：¥%s/人；基准 ¥%s；此前最低 %s",
@@ -152,6 +163,7 @@ class DealMonitor:
             )
             should_notify = (
                 not initialize_baseline
+                and notify_top <= 0
                 and self.state.should_notify(
                     deal, self.settings.notification_drop_per_adult
                 )
@@ -171,7 +183,23 @@ class DealMonitor:
             if not dry_run:
                 self.state.mark_seen(deal, now, notified=should_notify)
 
+        if notify_top > 0 and not dry_run:
+            ranked = sorted(
+                observed_deals, key=lambda item: item.price_per_adult
+            )[:notify_top]
+            self.notifier.send_top_deals(
+                ranked,
+                self.settings.airport_names,
+                now,
+                notify_top,
+            )
+
         if not dry_run:
             self.state.save()
-        logger.info("本轮完成：观察到 %d 条路线最低价，新推送 %d 条", len(merge_candidates(groups)), len(deals))
+        logger.info(
+            "本轮完成：观察到 %d 条路线最低价，新推送 %d 条，榜单 %d 条",
+            len(observed_deals),
+            len(deals),
+            min(len(observed_deals), notify_top) if notify_top > 0 else 0,
+        )
         return deals

@@ -18,6 +18,11 @@ on:
         required: false
         default: false
         type: boolean
+      notify_top_10:
+        description: "全量扫描并推送当前最便宜的前十条路线"
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -73,6 +78,7 @@ jobs:
           python -m flight_monitor.app
           ${{ (github.event_name == 'workflow_dispatch' && inputs.dry_run) && '--dry-run' || '' }}
           ${{ (github.event_name == 'workflow_dispatch' && inputs.initialize_baseline) && '--initialize-baseline --scan-all' || '' }}
+          ${{ (github.event_name == 'workflow_dispatch' && inputs.notify_top_10) && '--notify-top 10 --scan-all' || '' }}
 
       - name: 保存去重状态
         if: ${{ always() && hashFiles('state/monitor-state.json') != '' }}

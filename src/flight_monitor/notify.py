@@ -79,6 +79,53 @@ class PushPlusNotifier:
             ),
         )
 
+    def send_top_deals(
+        self,
+        deals: list[FlightDeal],
+        airport_names: dict[str, str],
+        now: datetime,
+        requested_count: int,
+    ) -> None:
+        if not deals:
+            content = "\n".join(
+                [
+                    "## ✈️ 潮汕机票低价榜",
+                    "",
+                    "本轮全量扫描没有找到目标日期和机场范围内的缓存价格。",
+                    "",
+                    "> 没有缓存记录不代表没有航班或没有票，只表示近期 Aviasales 搜索缓存未覆盖。",
+                ]
+            )
+            self._send("潮汕机票低价榜：本轮无缓存结果", content)
+            return
+
+        lines = [
+            f"## ✈️ 当前最便宜路线（{len(deals)}/{requested_count}条）",
+            "",
+        ]
+        for index, deal in enumerate(deals, start=1):
+            origin = airport_names.get(deal.origin, deal.origin)
+            destination = airport_names.get(deal.destination, deal.destination)
+            stop_text = "直飞" if deal.stops == 0 else (
+                f"中转{deal.stops}次" if deal.stops > 0 else "中转待确认"
+            )
+            lines.append(
+                f"{index}. **{origin}→{destination}**｜{deal.departure_at.strftime('%m-%d %H:%M')}｜"
+                f"¥{deal.price_per_adult:.0f}/人｜三人¥{deal.total_price:.0f}｜{stop_text}"
+            )
+        lines.extend(
+            [
+                "",
+                f"扫描时间：{now.strftime('%Y-%m-%d %H:%M:%S')}（北京时间）",
+                "",
+                "> 排名来自近期搜索缓存，不保证仍有3张票，也不保证包含税费、优惠券或每人20kg托运行李。请在携程、去哪儿、飞猪及航司官网核对最终支付价。",
+            ]
+        )
+        self._send(
+            f"潮汕机票低价榜：当前{len(deals)}条候选",
+            "\n".join(lines),
+        )
+
     def _comparison_links(self, deal: FlightDeal) -> list[tuple[str, str]]:
         origin = deal.origin
         destination = deal.destination

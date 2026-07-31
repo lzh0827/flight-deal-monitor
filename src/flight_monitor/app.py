@@ -36,6 +36,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="扫描并保存当前观察价作为基线，不发送低价提醒",
     )
     parser.add_argument("--scan-all", action="store_true", help="本轮扫描全部任务")
+    parser.add_argument(
+        "--notify-top",
+        type=int,
+        default=0,
+        help="把本轮最便宜的前N条路线合并推送到微信",
+    )
     return parser.parse_args(argv)
 
 
@@ -76,6 +82,7 @@ def main(argv: list[str] | None = None) -> int:
             dry_run=args.dry_run,
             initialize_baseline=args.initialize_baseline,
             scan_all=args.scan_all,
+            notify_top=max(0, args.notify_top),
         )
         return 0
     except Exception as exc:
